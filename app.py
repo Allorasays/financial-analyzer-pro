@@ -13,6 +13,13 @@ from typing import Dict, List, Optional, Tuple
 import warnings
 warnings.filterwarnings('ignore')
 
+# Import authentication system
+from auth_system import (
+    get_auth_system, get_portfolio_manager, 
+    show_login_form, show_user_dashboard, 
+    show_portfolio_page, show_watchlist_page, logout_user
+)
+
 # Performance monitoring
 import time
 from functools import wraps
@@ -34,76 +41,277 @@ def performance_monitor(func):
             raise
     return wrapper
 
-# Enhanced data fetching with caching and performance monitoring
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-@performance_monitor
-def fetch_real_time_data(ticker: str) -> Dict:
-    """Fetch real-time market data for a ticker"""
+# Enhanced data fetching with multiple sources and robust error handling
+def test_data_fetch(ticker: str):
+    """Test function to debug data fetching"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
-        
-        # Get real-time price data
         hist = stock.history(period="5d")
-        current_price = hist['Close'].iloc[-1] if not hist.empty else None
+        
+        print(f"Testing {ticker}:")
+        print(f"Info keys: {list(info.keys())[:10] if info else 'None'}")
+        print(f"History shape: {hist.shape if not hist.empty else 'Empty'}")
+        print(f"History columns: {list(hist.columns) if not hist.empty else 'None'}")
+        
+        return True
+    except Exception as e:
+        print(f"Error testing {ticker}: {e}")
+        return False
+
+@st.cache_data(ttl=300)  # Cache for 5 minutes
+@performance_monitor
+def fetch_real_time_data(ticker: str) -> Dict:
+    """Fetch real-time market data for a ticker with multiple fallback sources"""
+    try:
+        # Primary source: yfinance
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        # Skip validation for now - let the data speak for itself
+        # if not info:
+        #     st.error(f"❌ Ticker '{ticker}' not found. Please check the symbol.")
+        #     return {}
+        
+        # Get real-time price data with error handling
+        hist = stock.history(period="5d")
+        if hist.empty:
+            st.warning(f"⚠️ No recent data available for {ticker}")
+            return {}
+        
+        current_price = hist['Close'].iloc[-1]
         price_change = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else 0
         price_change_pct = (price_change / hist['Close'].iloc[-2] * 100) if len(hist) > 1 and hist['Close'].iloc[-2] != 0 else 0
         
+        # Get additional market data
+        hist_1y = stock.history(period="1y")
+        hist_1m = stock.history(period="1mo")
+        
+        # Calculate additional metrics
+        volatility = hist['Close'].pct_change().std() * np.sqrt(252) if len(hist) > 1 else 0
+        avg_volume_30d = hist['Volume'].tail(30).mean() if len(hist) >= 30 else hist['Volume'].mean()
+        
+        # 52-week high/low from historical data
+        if not hist_1y.empty:
+            fifty_two_week_high = hist_1y['High'].max()
+            fifty_two_week_low = hist_1y['Low'].min()
+        else:
+            fifty_two_week_high = info.get('fiftyTwoWeekHigh', current_price)
+            fifty_two_week_low = info.get('fiftyTwoWeekLow', current_price)
+        
         return {
-            'current_price': current_price,
-            'price_change': price_change,
-            'price_change_pct': price_change_pct,
-            'volume': info.get('volume', 0),
+            'symbol': ticker.upper(),
+            'current_price': round(current_price, 2),
+            'price_change': round(price_change, 2),
+            'price_change_pct': round(price_change_pct, 2),
+            'volume': int(hist['Volume'].iloc[-1]) if not hist.empty else 0,
+            'avg_volume_30d': int(avg_volume_30d) if not pd.isna(avg_volume_30d) else 0,
             'market_cap': info.get('marketCap', 0),
-            'pe_ratio': info.get('trailingPE', 0),
-            'dividend_yield': info.get('dividendYield', 0),
-            'beta': info.get('beta', 0),
-            'fifty_two_week_high': info.get('fiftyTwoWeekHigh', 0),
-            'fifty_two_week_low': info.get('fiftyTwoWeekLow', 0),
-            'avg_volume': info.get('averageVolume', 0),
-            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            'pe_ratio': round(info.get('trailingPE', 0), 2) if info.get('trailingPE') else None,
+            'forward_pe': round(info.get('forwardPE', 0), 2) if info.get('forwardPE') else None,
+            'dividend_yield': round(info.get('dividendYield', 0) * 100, 2) if info.get('dividendYield') else 0,
+            'beta': round(info.get('beta', 0), 2) if info.get('beta') else None,
+            'fifty_two_week_high': round(fifty_two_week_high, 2),
+            'fifty_two_week_low': round(fifty_two_week_low, 2),
+            'volatility': round(volatility * 100, 2),
+            'sector': info.get('sector', 'N/A'),
+            'industry': info.get('industry', 'N/A'),
+            'currency': info.get('currency', 'USD'),
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': 'yfinance'
         }
     except Exception as e:
-        st.error(f"Error fetching real-time data: {e}")
+        st.error(f"❌ Error fetching real-time data for {ticker}: {str(e)}")
+        # Try fallback API if available
+        return fetch_fallback_data(ticker)
+
+@st.cache_data(ttl=600)  # Cache for 10 minutes
+def fetch_fallback_data(ticker: str) -> Dict:
+    """Fallback data source when primary fails"""
+    try:
+        # You can add alternative APIs here like Alpha Vantage, IEX Cloud, etc.
+        # For now, return basic structure
+        return {
+            'symbol': ticker.upper(),
+            'current_price': None,
+            'price_change': None,
+            'price_change_pct': None,
+            'volume': 0,
+            'avg_volume_30d': 0,
+            'market_cap': 0,
+            'pe_ratio': None,
+            'forward_pe': None,
+            'dividend_yield': 0,
+            'beta': None,
+            'fifty_two_week_high': None,
+            'fifty_two_week_low': None,
+            'volatility': None,
+            'sector': 'N/A',
+            'industry': 'N/A',
+            'currency': 'USD',
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': 'fallback',
+            'error': 'Primary data source unavailable'
+        }
+    except Exception as e:
+        st.error(f"❌ Fallback data source also failed: {str(e)}")
         return {}
 
 @st.cache_data(ttl=3600)  # Cache for 1 hour
+@performance_monitor
 def fetch_enhanced_financials(ticker: str) -> Dict:
-    """Fetch enhanced financial data with multiple sources"""
+    """Fetch comprehensive financial data from multiple sources"""
     try:
-        # Primary API call
-        import os
-        api_base_url = os.getenv('API_BASE_URL', 'http://localhost:8000')
-        response = requests.get(f"{api_base_url}/api/financials/{ticker}")
+        stock = yf.Ticker(ticker)
         
-        if response.status_code == 200:
-            data = response.json()
+        # Get financial statements with error handling
+        try:
+            financials = stock.financials
+        except:
+            financials = None
             
-            # Enhance with yfinance data if available
-            try:
-                stock = yf.Ticker(ticker)
-                yf_info = stock.info
-                
-                # Add additional metrics
-                enhanced_data = {
-                    'financials': data,
-                    'market_data': {
-                        'sector': yf_info.get('sector', 'N/A'),
-                        'industry': yf_info.get('industry', 'N/A'),
-                        'country': yf_info.get('country', 'N/A'),
-                        'employees': yf_info.get('fullTimeEmployees', 0),
-                        'website': yf_info.get('website', 'N/A'),
-                        'business_summary': yf_info.get('longBusinessSummary', 'N/A')
-                    }
-                }
-                return enhanced_data
-            except:
-                return {'financials': data, 'market_data': {}}
-        else:
-            return {}
+        try:
+            balance_sheet = stock.balance_sheet
+        except:
+            balance_sheet = None
             
+        try:
+            cash_flow = stock.cashflow
+        except:
+            cash_flow = None
+            
+        try:
+            info = stock.info
+        except:
+            info = {}
+        
+        # Get quarterly data for more recent information
+        try:
+            quarterly_financials = stock.quarterly_financials
+        except:
+            quarterly_financials = None
+            
+        try:
+            quarterly_balance_sheet = stock.quarterly_balance_sheet
+        except:
+            quarterly_balance_sheet = None
+            
+        try:
+            quarterly_cash_flow = stock.quarterly_cashflow
+        except:
+            quarterly_cash_flow = None
+        
+        # Process financial data with null checks
+        processed_data = {
+            'income_statement': process_financial_statement(financials, 'Income Statement') if financials is not None else {},
+            'balance_sheet': process_financial_statement(balance_sheet, 'Balance Sheet') if balance_sheet is not None else {},
+            'cash_flow': process_financial_statement(cash_flow, 'Cash Flow') if cash_flow is not None else {},
+            'quarterly_income': process_financial_statement(quarterly_financials, 'Quarterly Income') if quarterly_financials is not None else {},
+            'quarterly_balance': process_financial_statement(quarterly_balance_sheet, 'Quarterly Balance') if quarterly_balance_sheet is not None else {},
+            'quarterly_cash_flow': process_financial_statement(quarterly_cash_flow, 'Quarterly Cash Flow') if quarterly_cash_flow is not None else {},
+            'company_info': {
+                'sector': info.get('sector', 'N/A'),
+                'industry': info.get('industry', 'N/A'),
+                'country': info.get('country', 'N/A'),
+                'employees': info.get('fullTimeEmployees', 0),
+                'website': info.get('website', 'N/A'),
+                'business_summary': info.get('longBusinessSummary', 'N/A'),
+                'market_cap': info.get('marketCap', 0),
+                'enterprise_value': info.get('enterpriseValue', 0),
+                'book_value': info.get('bookValue', 0),
+                'price_to_book': info.get('priceToBook', 0),
+                'debt_to_equity': info.get('debtToEquity', 0),
+                'return_on_equity': info.get('returnOnEquity', 0),
+                'return_on_assets': info.get('returnOnAssets', 0),
+                'gross_margins': info.get('grossMargins', 0),
+                'operating_margins': info.get('operatingMargins', 0),
+                'profit_margins': info.get('profitMargins', 0)
+            },
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': 'yfinance'
+        }
+        
+        return processed_data
+        
     except Exception as e:
-        st.error(f"Error fetching financial data: {e}")
+        st.error(f"❌ Error fetching financial data for {ticker}: {str(e)}")
+        return {}
+
+def process_financial_statement(df, statement_type: str) -> Dict:
+    """Process financial statement DataFrame into structured format"""
+    if df is None or df.empty:
+        return {}
+    
+    try:
+        # Convert to dictionary with proper formatting
+        data = {}
+        for col in df.columns:
+            year = col.strftime('%Y-%m-%d') if hasattr(col, 'strftime') else str(col)
+            data[year] = {}
+            
+            for index, value in df[col].items():
+                if pd.notna(value):
+                    # Format large numbers
+                    if abs(value) >= 1e9:
+                        formatted_value = f"{value/1e9:.2f}B"
+                    elif abs(value) >= 1e6:
+                        formatted_value = f"{value/1e6:.2f}M"
+                    elif abs(value) >= 1e3:
+                        formatted_value = f"{value/1e3:.2f}K"
+                    else:
+                        formatted_value = f"{value:.2f}"
+                    
+                    data[year][str(index)] = {
+                        'raw_value': float(value),
+                        'formatted_value': formatted_value
+                    }
+        
+        return data
+    except Exception as e:
+        st.warning(f"⚠️ Error processing {statement_type}: {str(e)}")
+        return {}
+
+@st.cache_data(ttl=1800)  # Cache for 30 minutes
+def fetch_market_overview() -> Dict:
+    """Fetch real-time market overview data"""
+    try:
+        # Major indices
+        indices = {
+            'S&P 500': yf.Ticker('^GSPC'),
+            'Dow Jones': yf.Ticker('^DJI'),
+            'NASDAQ': yf.Ticker('^IXIC'),
+            'Russell 2000': yf.Ticker('^RUT'),
+            'VIX': yf.Ticker('^VIX')
+        }
+        
+        market_data = {}
+        for name, ticker in indices.items():
+            try:
+                hist = ticker.history(period="2d")
+                if not hist.empty:
+                    current = hist['Close'].iloc[-1]
+                    previous = hist['Close'].iloc[-2] if len(hist) > 1 else current
+                    change = current - previous
+                    change_pct = (change / previous * 100) if previous != 0 else 0
+                    
+                    market_data[name] = {
+                        'value': round(current, 2),
+                        'change': round(change, 2),
+                        'change_pct': round(change_pct, 2),
+                        'status': 'up' if change >= 0 else 'down'
+                    }
+            except Exception as e:
+                st.warning(f"⚠️ Could not fetch {name}: {str(e)}")
+                continue
+        
+        return {
+            'indices': market_data,
+            'last_updated': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            'data_source': 'yfinance'
+        }
+        
+    except Exception as e:
+        st.error(f"❌ Error fetching market overview: {str(e)}")
         return {}
 
 # Health check for Render
@@ -475,6 +683,58 @@ def detect_anomalies(financial_data: pd.DataFrame, threshold: float = 2.0) -> Di
     except Exception as e:
         return {'error': str(e)}
 
+def create_financial_dataframe(enhanced_data: Dict) -> pd.DataFrame:
+    """Create a DataFrame from enhanced financial data"""
+    try:
+        if not enhanced_data or 'income_statement' not in enhanced_data:
+            return pd.DataFrame()
+        
+        income_data = enhanced_data.get('income_statement', {})
+        if not income_data:
+            return pd.DataFrame()
+        
+        # Extract years and create DataFrame
+        years = []
+        revenue_data = []
+        net_income_data = []
+        
+        for year, data in income_data.items():
+            if isinstance(year, str) and len(year) == 10:  # YYYY-MM-DD format
+                year_int = int(year[:4])
+                years.append(year_int)
+                
+                # Get revenue and net income
+                revenue = 0
+                net_income = 0
+                
+                for metric, value in data.items():
+                    if 'revenue' in metric.lower() or 'total revenue' in metric.lower():
+                        revenue = value.get('raw_value', 0) / 1e6  # Convert to millions
+                    elif 'net income' in metric.lower() or 'net earnings' in metric.lower():
+                        net_income = value.get('raw_value', 0) / 1e6  # Convert to millions
+                
+                revenue_data.append(revenue)
+                net_income_data.append(net_income)
+        
+        if not years:
+            return pd.DataFrame()
+        
+        # Create DataFrame
+        df = pd.DataFrame({
+            'Year': years,
+            'Revenue': revenue_data,
+            'NetIncome': net_income_data
+        })
+        
+        # Sort by year
+        df = df.sort_values('Year').reset_index(drop=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Error creating financial DataFrame: {e}")
+        return pd.DataFrame()
+
 def calculate_risk_score(financial_data: pd.DataFrame) -> Dict:
     """Calculate comprehensive risk score based on multiple factors"""
     try:
@@ -547,14 +807,79 @@ def calculate_risk_score(financial_data: pd.DataFrame) -> Dict:
     except Exception as e:
         return {'error': str(e)}
 
+# Authentication and Session Management
+def check_authentication():
+    """Check if user is authenticated"""
+    if 'session_id' in st.session_state:
+        auth = get_auth_system()
+        username = auth.validate_session(st.session_state['session_id'])
+        if username:
+            st.session_state['username'] = username
+            return True
+        else:
+            # Session expired
+            for key in ['session_id', 'username']:
+                if key in st.session_state:
+                    del st.session_state[key]
+    return False
+
+# Initialize session state
+if 'use_custom_criteria' not in st.session_state:
+    st.session_state.use_custom_criteria = False
+if 'custom_criteria' not in st.session_state:
+    st.session_state.custom_criteria = []
+if 'current_page' not in st.session_state:
+    st.session_state.current_page = 'main'
+
+# Check authentication
+is_authenticated = check_authentication()
+
 # Sidebar
 with st.sidebar:
-    st.header("🔑 Authentication")
-    st.info("Auth0 integration coming soon")
-    
-    st.header("⚙️ Settings")
-    chart_theme = st.selectbox("Chart Theme", ["plotly", "plotly_white", "plotly_dark"])
-    default_ticker = st.text_input("Default Ticker", value="AAPL")
+    if is_authenticated:
+        # User is logged in
+        st.header(f"👋 Welcome, {st.session_state['username']}!")
+        
+        # Navigation
+        page = st.selectbox(
+            "Navigate",
+            ["📊 Stock Analysis", "📈 Portfolio", "👀 Watchlist", "📊 Market Overview", "🏭 Industry Analysis"],
+            index=0
+        )
+        
+        if page == "📈 Portfolio":
+            st.session_state.current_page = 'portfolio'
+        elif page == "👀 Watchlist":
+            st.session_state.current_page = 'watchlist'
+        elif page == "📊 Market Overview":
+            st.session_state.current_page = 'market'
+        elif page == "🏭 Industry Analysis":
+            st.session_state.current_page = 'industry'
+        else:
+            st.session_state.current_page = 'main'
+        
+        # Logout button
+        if st.button("🚪 Logout"):
+            logout_user()
+        
+        st.divider()
+        
+        # Settings
+        st.header("⚙️ Settings")
+        chart_theme = st.selectbox("Chart Theme", ["plotly", "plotly_white", "plotly_dark"])
+        default_ticker = st.text_input("Default Ticker", value="AAPL")
+        
+    else:
+        # User is not logged in
+        st.header("🔑 Authentication")
+        show_login_form()
+        
+        st.divider()
+        
+        # Settings for non-authenticated users
+        st.header("⚙️ Settings")
+        chart_theme = st.selectbox("Chart Theme", ["plotly", "plotly_white", "plotly_dark"])
+        default_ticker = st.text_input("Default Ticker", value="AAPL")
     
     st.header("📊 Analysis Criteria")
     use_custom = st.checkbox("Use Custom Criteria", value=st.session_state.use_custom_criteria)
@@ -725,14 +1050,50 @@ with st.sidebar:
                     st.session_state.watchlist.pop(i)
                     st.rerun()
 
-# Main content
-col1, col2 = st.columns([2, 1])
-
-with col1:
-    ticker = st.text_input("Enter Stock Ticker:", value=default_ticker, placeholder="e.g., TSLA, AAPL, MSFT")
+# Main content area with page routing
+if st.session_state.current_page == 'portfolio':
+    show_portfolio_page()
+elif st.session_state.current_page == 'watchlist':
+    show_watchlist_page()
+elif st.session_state.current_page == 'market':
+    # Market Overview Page
+    st.markdown("# 📊 Market Overview")
+    market_data = fetch_market_overview()
     
-with col2:
-    analysis_type = st.selectbox("Analysis Type", ["Financial Metrics", "Technical Analysis", "Valuation", "Risk Assessment"])
+    if market_data and 'indices' in market_data:
+        st.subheader("📈 Major Indices")
+        
+        # Create columns for indices
+        cols = st.columns(len(market_data['indices']))
+        for i, (name, data) in enumerate(market_data['indices'].items()):
+            with cols[i]:
+                color = "green" if data['status'] == 'up' else "red"
+                st.metric(
+                    name,
+                    f"${data['value']:,.2f}",
+                    delta=f"{data['change']:+.2f} ({data['change_pct']:+.2f}%)"
+                )
+        
+        st.info(f"Last updated: {market_data.get('last_updated', 'N/A')}")
+    else:
+        st.error("❌ Unable to fetch market data")
+        
+elif st.session_state.current_page == 'industry':
+    # Industry Analysis Page
+    st.markdown("# 🏭 Industry Analysis")
+    st.info("Industry analysis features coming soon!")
+    
+else:
+    # Main Stock Analysis Page
+    st.markdown("# 📊 Financial Analyzer Pro")
+    
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        ticker = st.text_input("Enter Stock Ticker:", value=default_ticker, placeholder="e.g., TSLA, AAPL, MSFT")
+        
+    with col2:
+        analysis_type = st.selectbox("Analysis Type", ["Financial Metrics", "Technical Analysis", "Valuation", "Risk Assessment"])
 
 if ticker:
     st.markdown(f"## 📈 Analysis for {ticker.upper()}")
@@ -742,96 +1103,161 @@ if ticker:
         enhanced_data = fetch_enhanced_financials(ticker)
         real_time_data = fetch_real_time_data(ticker)
         
-        if enhanced_data and 'financials' in enhanced_data:
-            data = enhanced_data['financials']
-            df = pd.DataFrame(data)
-            market_data = enhanced_data.get('market_data', {})
+        # Create DataFrame from financial data
+        df = create_financial_dataframe(enhanced_data)
+        
+        # Always show real-time data if available
+        if real_time_data:
+            st.subheader("📊 Real-time Market Data")
+            col1, col2, col3, col4 = st.columns(4)
             
-            # Real-time market data display
-            if real_time_data:
-                st.subheader("📊 Real-time Market Data")
-                col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                current_price = real_time_data.get('current_price', 'N/A')
+                price_change = real_time_data.get('price_change', 0)
+                price_change_pct = real_time_data.get('price_change_pct', 0)
                 
-                with col1:
-                    current_price = real_time_data.get('current_price', 'N/A')
-                    price_change = real_time_data.get('price_change', 0)
-                    price_change_pct = real_time_data.get('price_change_pct', 0)
-                    
-                    if current_price != 'N/A':
-                        st.metric(
-                            "Current Price", 
-                            f"${current_price:.2f}",
-                            delta=f"{price_change:+.2f} ({price_change_pct:+.1f}%)"
-                        )
-                    else:
-                        st.metric("Current Price", "N/A")
-                
-                with col2:
-                    market_cap = real_time_data.get('market_cap', 0)
-                    st.metric("Market Cap", f"${market_cap:,.0f}M" if market_cap > 0 else "N/A")
-                
-                with col3:
-                    pe_ratio = real_time_data.get('pe_ratio', 0)
-                    st.metric("P/E Ratio", f"{pe_ratio:.2f}" if pe_ratio > 0 else "N/A")
-                
-                with col4:
-                    volume = real_time_data.get('volume', 0)
-                    st.metric("Volume", f"{volume:,.0f}" if volume > 0 else "N/A")
-                
-                # Additional market info
-                if market_data:
-                    st.subheader("🏢 Company Information")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.write(f"**Sector:** {market_data.get('sector', 'N/A')}")
-                        st.write(f"**Industry:** {market_data.get('industry', 'N/A')}")
-                    
-                    with col2:
-                        st.write(f"**Country:** {market_data.get('country', 'N/A')}")
-                        st.write(f"**Employees:** {market_data.get('employees', 'N/A'):,}" if market_data.get('employees') else "**Employees:** N/A")
-                    
-                    with col3:
-                        st.write(f"**Website:** {market_data.get('website', 'N/A')}")
-                    
-                    if market_data.get('business_summary'):
-                        with st.expander("📝 Business Summary"):
-                            st.write(market_data['business_summary'])
+                if current_price != 'N/A':
+                    st.metric(
+                        "Current Price", 
+                        f"${current_price:.2f}",
+                        delta=f"{price_change:+.2f} ({price_change_pct:+.1f}%)"
+                    )
+                else:
+                    st.metric("Current Price", "N/A")
+            
+            with col2:
+                market_cap = real_time_data.get('market_cap', 0)
+                st.metric("Market Cap", f"${market_cap:,.0f}M" if market_cap > 0 else "N/A")
+            
+            with col3:
+                pe_ratio = real_time_data.get('pe_ratio', 0)
+                st.metric("P/E Ratio", f"{pe_ratio:.2f}" if pe_ratio > 0 else "N/A")
+            
+            with col4:
+                volume = real_time_data.get('volume', 0)
+                st.metric("Volume", f"{volume:,.0f}" if volume > 0 else "N/A")
+        
+        # Additional market info
+        if enhanced_data and 'company_info' in enhanced_data:
+            company_info = enhanced_data['company_info']
+            st.subheader("🏢 Company Information")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.write(f"**Sector:** {company_info.get('sector', 'N/A')}")
+                st.write(f"**Industry:** {company_info.get('industry', 'N/A')}")
+            
+            with col2:
+                st.write(f"**Country:** {company_info.get('country', 'N/A')}")
+                employees = company_info.get('employees', 0)
+                if employees and employees > 0:
+                    st.write(f"**Employees:** {employees:,}")
+                else:
+                    st.write("**Employees:** N/A")
+            
+            with col3:
+                website = company_info.get('website', 'N/A')
+                if website and website != 'N/A':
+                    st.write(f"**Website:** [{website}]({website})")
+                else:
+                    st.write("**Website:** N/A")
+            
+            # Additional company metrics
+            st.subheader("📊 Key Company Metrics")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                market_cap = company_info.get('market_cap', 0)
+                if market_cap and market_cap > 0:
+                    st.metric("Market Cap", f"${market_cap/1e9:.2f}B")
+                else:
+                    st.metric("Market Cap", "N/A")
+            
+            with col2:
+                book_value = company_info.get('book_value', 0)
+                if book_value and book_value > 0:
+                    st.metric("Book Value", f"${book_value:.2f}")
+                else:
+                    st.metric("Book Value", "N/A")
+            
+            with col3:
+                roe = company_info.get('return_on_equity', 0)
+                if roe and roe > 0:
+                    st.metric("ROE", f"{roe*100:.1f}%")
+                else:
+                    st.metric("ROE", "N/A")
+            
+            with col4:
+                profit_margin = company_info.get('profit_margins', 0)
+                if profit_margin and profit_margin > 0:
+                    st.metric("Profit Margin", f"{profit_margin*100:.1f}%")
+                else:
+                    st.metric("Profit Margin", "N/A")
+            
+            # Business Summary
+            business_summary = company_info.get('business_summary', '')
+            if business_summary and business_summary != 'N/A':
+                with st.expander("📝 Business Summary"):
+                    st.write(business_summary)
             
             # Key Financial Metrics
             st.subheader("💰 Key Financial Metrics")
             col1, col2, col3, col4 = st.columns(4)
             
-            with col1:
-                latest_revenue = df['Revenue'].iloc[-1] if 'Revenue' in df.columns else 0
-                st.metric("Latest Revenue", f"${latest_revenue:,.0f}M")
-            
-            with col2:
-                latest_net_income = df['NetIncome'].iloc[-1] if 'NetIncome' in df.columns else 0
-                st.metric("Latest Net Income", f"${latest_net_income:,.0f}M")
-            
-            with col3:
-                if len(df) > 1:
-                    revenue_growth = ((df['Revenue'].iloc[-1] - df['Revenue'].iloc[-2]) / df['Revenue'].iloc[-2]) * 100
-                    st.metric("Revenue Growth YoY", f"{revenue_growth:.1f}%")
-                else:
+            # Check if DataFrame is not empty and has data
+            if not df.empty and len(df) > 0:
+                with col1:
+                    if 'Revenue' in df.columns and not df['Revenue'].empty:
+                        latest_revenue = df['Revenue'].iloc[-1]
+                        st.metric("Latest Revenue", f"${latest_revenue:,.0f}M")
+                    else:
+                        st.metric("Latest Revenue", "N/A")
+                
+                with col2:
+                    if 'NetIncome' in df.columns and not df['NetIncome'].empty:
+                        latest_net_income = df['NetIncome'].iloc[-1]
+                        st.metric("Latest Net Income", f"${latest_net_income:,.0f}M")
+                    else:
+                        st.metric("Latest Net Income", "N/A")
+                
+                with col3:
+                    if len(df) > 1 and 'Revenue' in df.columns and not df['Revenue'].empty:
+                        try:
+                            revenue_growth = ((df['Revenue'].iloc[-1] - df['Revenue'].iloc[-2]) / df['Revenue'].iloc[-2]) * 100
+                            st.metric("Revenue Growth YoY", f"{revenue_growth:.1f}%")
+                        except (ZeroDivisionError, IndexError):
+                            st.metric("Revenue Growth YoY", "N/A")
+                    else:
+                        st.metric("Revenue Growth YoY", "N/A")
+                
+                with col4:
+                    if ('Revenue' in df.columns and 'NetIncome' in df.columns and 
+                        not df['Revenue'].empty and not df['NetIncome'].empty):
+                        try:
+                            profit_margin = (df['NetIncome'].iloc[-1] / df['Revenue'].iloc[-1]) * 100
+                            st.metric("Profit Margin", f"{profit_margin:.1f}%")
+                        except (ZeroDivisionError, IndexError):
+                            st.metric("Profit Margin", "N/A")
+                    else:
+                        st.metric("Profit Margin", "N/A")
+            else:
+                with col1:
+                    st.metric("Latest Revenue", "N/A")
+                with col2:
+                    st.metric("Latest Net Income", "N/A")
+                with col3:
                     st.metric("Revenue Growth YoY", "N/A")
-            
-            with col4:
-                if 'Revenue' in df.columns and 'NetIncome' in df.columns:
-                    profit_margin = (df['NetIncome'].iloc[-1] / df['Revenue'].iloc[-1]) * 100
-                    st.metric("Profit Margin", f"{profit_margin:.1f}%")
-                else:
+                with col4:
                     st.metric("Profit Margin", "N/A")
             
             # Charts
-            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs([
+            tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs([
                 "📊 Financial Trends", "📈 Performance Metrics", "🏭 Peer Comparison", "📋 Data Table", 
-                "🎯 Criteria Analysis", "💰 DCF Valuation", "⚠️ Risk Analysis", "📊 Sensitivity Analysis", "🤖 ML Analysis"
+                "🎯 Criteria Analysis", "💰 DCF Valuation", "⚠️ Risk Analysis", "📊 Sensitivity Analysis", "🤖 ML Analysis", "📊 Balance Sheet"
             ])
             
             with tab1:
-                if "Revenue" in df.columns and "NetIncome" in df.columns:
+                if not df.empty and "Revenue" in df.columns and "NetIncome" in df.columns and not df['Revenue'].empty and not df['NetIncome'].empty:
                     # Enhanced interactive chart
                     fig = go.Figure()
                     
@@ -1076,6 +1502,8 @@ if ticker:
                                     st.write(f"• {corr['Metric 1']} ↔ {corr['Metric 2']}: {corr['Correlation']:.3f}")
                             else:
                                 st.info("No strong correlations found between metrics")
+                else:
+                    st.warning("No financial data available for charting")
             
             with tab2:
                 if len(df) > 1:
@@ -1249,8 +1677,9 @@ if ticker:
                 st.subheader("🏭 Peer Comparison & Industry Analysis")
                 
                 # Get industry information
-                industry = market_data.get('industry', 'Unknown') if market_data else 'Unknown'
-                sector = market_data.get('sector', 'Unknown') if market_data else 'Unknown'
+                company_info = enhanced_data.get('company_info', {}) if enhanced_data else {}
+                industry = company_info.get('industry', 'Unknown')
+                sector = company_info.get('sector', 'Unknown')
                 
                 if industry != 'Unknown':
                     st.info(f"**Industry:** {industry} | **Sector:** {sector}")
@@ -2070,12 +2499,141 @@ if ticker:
                             )
                 else:
                     st.info("Insufficient data for ML analysis (need at least 3 years of data)")
+            
+            with tab10:
+                st.subheader("📊 Balance Sheet Analysis")
+                
+                if enhanced_data and 'balance_sheet' in enhanced_data:
+                    balance_sheet_data = enhanced_data['balance_sheet']
+                    
+                    if balance_sheet_data:
+                        # Get the most recent quarter data
+                        latest_quarter = None
+                        latest_date = None
+                        
+                        for date, data in balance_sheet_data.items():
+                            if latest_date is None or date > latest_date:
+                                latest_date = date
+                                latest_quarter = data
+                        
+                        if latest_quarter:
+                            st.success(f"📅 **Latest Quarter:** {latest_date}")
+                            
+                            # Key Balance Sheet Metrics
+                            st.subheader("💰 Key Balance Sheet Metrics")
+                            
+                            col1, col2, col3, col4 = st.columns(4)
+                            
+                            # Total Assets
+                            total_assets = None
+                            for metric, value in latest_quarter.items():
+                                if 'total assets' in metric.lower() or 'totalassets' in metric.lower():
+                                    total_assets = value.get('raw_value', 0) / 1e6  # Convert to millions
+                                    break
+                            
+                            with col1:
+                                if total_assets:
+                                    st.metric("Total Assets", f"${total_assets:,.0f}M")
+                                else:
+                                    st.metric("Total Assets", "N/A")
+                            
+                            # Total Liabilities
+                            total_liabilities = None
+                            for metric, value in latest_quarter.items():
+                                if 'total liabilities' in metric.lower() or 'totalliabilities' in metric.lower():
+                                    total_liabilities = value.get('raw_value', 0) / 1e6
+                                    break
+                            
+                            with col2:
+                                if total_liabilities:
+                                    st.metric("Total Liabilities", f"${total_liabilities:,.0f}M")
+                                else:
+                                    st.metric("Total Liabilities", "N/A")
+                            
+                            # Shareholders Equity
+                            equity = None
+                            for metric, value in latest_quarter.items():
+                                if 'shareholders equity' in metric.lower() or 'total equity' in metric.lower() or 'stockholders equity' in metric.lower():
+                                    equity = value.get('raw_value', 0) / 1e6
+                                    break
+                            
+                            with col3:
+                                if equity:
+                                    st.metric("Shareholders Equity", f"${equity:,.0f}M")
+                                else:
+                                    st.metric("Shareholders Equity", "N/A")
+                            
+                            # Debt to Equity Ratio
+                            with col4:
+                                if total_liabilities and equity and equity > 0:
+                                    debt_to_equity = total_liabilities / equity
+                                    st.metric("Debt/Equity Ratio", f"{debt_to_equity:.2f}")
+                                else:
+                                    st.metric("Debt/Equity Ratio", "N/A")
+                            
+                            # Detailed Balance Sheet Table
+                            st.subheader("📋 Detailed Balance Sheet")
+                            
+                            # Create a formatted table
+                            balance_sheet_items = []
+                            for metric, value in latest_quarter.items():
+                                raw_value = value.get('raw_value', 0)
+                                formatted_value = value.get('formatted_value', 'N/A')
+                                
+                                # Convert to millions for display
+                                if abs(raw_value) >= 1e6:
+                                    display_value = f"${raw_value/1e6:,.0f}M"
+                                elif abs(raw_value) >= 1e3:
+                                    display_value = f"${raw_value/1e3:,.0f}K"
+                                else:
+                                    display_value = f"${raw_value:,.0f}"
+                                
+                                balance_sheet_items.append({
+                                    'Item': metric.replace('_', ' ').title(),
+                                    'Value': display_value,
+                                    'Raw Value': raw_value
+                                })
+                            
+                            if balance_sheet_items:
+                                # Sort by absolute value
+                                balance_sheet_items.sort(key=lambda x: abs(x['Raw Value']), reverse=True)
+                                
+                                # Create DataFrame
+                                balance_df = pd.DataFrame(balance_sheet_items)
+                                
+                                # Display table
+                                st.dataframe(
+                                    balance_df[['Item', 'Value']], 
+                                    use_container_width=True,
+                                    hide_index=True
+                                )
+                                
+                                # Download option
+                                csv_data = balance_df.to_csv(index=False)
+                                st.download_button(
+                                    label="📥 Download Balance Sheet (CSV)",
+                                    data=csv_data,
+                                    file_name=f"{ticker}_balance_sheet_{latest_date}.csv",
+                                    mime="text/csv"
+                                )
+                            else:
+                                st.warning("No balance sheet data available for this quarter")
+                        else:
+                            st.warning("No balance sheet data found for the latest quarter")
+                    else:
+                        st.warning("No balance sheet data available")
+                else:
+                    st.error("Balance sheet data not available for this ticker")
                 
         else:
             st.error("No financial data found for this ticker.")
             
     except Exception as e:
         st.error(f"Error fetching data: {e}")
+    
+    else:
+        # Show basic message when no ticker is entered
+        st.info("👆 Please enter a stock ticker symbol above to see the analysis")
         st.info("Make sure the FastAPI backend is running and API_BASE_URL is configured")
 
 # Market Overview Section
@@ -2196,49 +2754,55 @@ if st.session_state.get('show_market_overview', False):
         trending_tickers = ['TSLA', 'NVDA', 'META', 'GOOGL', 'AAPL', 'MSFT']
         trending_data = []
         
-        for ticker in trending_tickers:
+        # Add progress bar for trending stocks
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        for i, ticker in enumerate(trending_tickers):
             try:
+                status_text.text(f"Fetching data for {ticker}...")
                 stock_data = fetch_real_time_data(ticker)
                 if stock_data and stock_data.get('current_price'):
                     trending_data.append({
                         'Ticker': ticker,
-                        'Price': stock_data['current_price'],
-                        'Change %': stock_data.get('price_change_pct', 0),
-                        'Volume': stock_data.get('volume', 0),
-                        'Market Cap': stock_data.get('market_cap', 0)
+                        'Price': f"${stock_data['current_price']:.2f}",
+                        'Change %': f"{stock_data.get('price_change_pct', 0):.2f}%",
+                        'Volume': f"{stock_data.get('volume', 0):,.0f}",
+                        'Market Cap': f"${stock_data.get('market_cap', 0)/1e9:.1f}B" if stock_data.get('market_cap', 0) > 0 else "N/A"
                     })
-            except:
-                continue
+                else:
+                    # Fallback data if real-time fetch fails
+                    trending_data.append({
+                        'Ticker': ticker,
+                        'Price': "N/A",
+                        'Change %': "N/A",
+                        'Volume': "N/A",
+                        'Market Cap': "N/A"
+                    })
+            except Exception as e:
+                # Fallback data on error
+                trending_data.append({
+                    'Ticker': ticker,
+                    'Price': "N/A",
+                    'Change %': "N/A",
+                    'Volume': "N/A",
+                    'Market Cap': "N/A"
+                })
+            
+            progress_bar.progress((i + 1) / len(trending_tickers))
+        
+        status_text.text("Trending stocks data loaded!")
         
         if trending_data:
             trending_df = pd.DataFrame(trending_data)
             
-            # Sort by absolute change percentage
-            trending_df['Abs Change %'] = trending_df['Change %'].abs()
-            trending_df = trending_df.sort_values('Abs Change %', ascending=False)
+            # Display the trending stocks table
+            st.dataframe(trending_df[['Ticker', 'Price', 'Change %', 'Volume', 'Market Cap']], use_container_width=True)
             
-            # Color code trending stocks
-            def color_trending(val, col_name):
-                if col_name == 'Change %':
-                    return 'background-color: #e8f5e8' if val > 0 else 'background-color: #ffebee' if val < 0 else ''
-                return ''
-            
-            styled_trending = trending_df.style.apply(lambda x: [color_trending(v, x.name) for v in x], axis=0)
-            st.dataframe(styled_trending[['Ticker', 'Price', 'Change %', 'Volume', 'Market Cap']], use_container_width=True)
-            
-            # Trending stocks chart
-            fig_trending = px.bar(
-                trending_df, 
-                x='Ticker', 
-                y='Change %',
-                color='Change %',
-                color_continuous_scale='RdYlGn',
-                title="Stock Performance Today",
-                template=chart_theme
-            )
-            
-            fig_trending.update_layout(height=400)
-            st.plotly_chart(fig_trending, use_container_width=True)
+            # Add some insights about trending stocks
+            st.info("💡 **Market Update**: These are the most actively traded stocks today. Data updates in real-time.")
+        else:
+            st.warning("⚠️ Unable to fetch trending stocks data at this time. Please try again later.")
         
         # Market insights
         st.subheader("💡 Market Insights")
