@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 services:
   - type: web
     name: financial-analyzer-pro
@@ -11,4 +12,19 @@ services:
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
+=======
+services:
+  - type: web
+    name: financial-analyzer-pro
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+>>>>>>> eb891dcd8f3c796766d23fc75ab2888a086d7ebf
         value: 0.0.0.0
