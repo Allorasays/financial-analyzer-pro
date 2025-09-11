@@ -1,36 +1,14 @@
 services:
-  # FastAPI Backend Service
   - type: web
-    name: financial-analyzer-api
+    name: financial-analyzer-pro
     env: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python proxy.py
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: PORT
-        value: 8000
-      - key: HOST
-        value: 0.0.0.0
-      - key: SECRET_KEY
-        value: your-secret-key-change-in-production
-
-  # Streamlit Frontend Service  
-  - type: web
-    name: financial-analyzer-streamlit
-    env: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.0
-      - key: PORT
-        value: 8501
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-      - key: API_BASE_URL
-        value: https://financial-analyzer-api.onrender.com
