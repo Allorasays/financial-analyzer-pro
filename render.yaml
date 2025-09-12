@@ -4,7 +4,7 @@ services:
     name: financial-analyzer-api
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: python proxy.py
     envVars:
       - key: PYTHON_VERSION
@@ -23,7 +23,7 @@ services:
     name: financial-analyzer-streamlit
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
     startCommand: python -m streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
