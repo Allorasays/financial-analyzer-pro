@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Analyzer Pro - Mobile Demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            max-width: 400px;
+            margin: 0 auto;
+            background: white;
+            min-height: 100vh;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+        
+        .nav {
+            display: flex;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .nav-item {
+            flex: 1;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        
+        .nav-item.active {
+            border-bottom-color: #667eea;
+            color: #667eea;
+            font-weight: 600;
+        }
+        
+        .content {
+            padding: 20px;
+            min-height: calc(100vh - 140px);
+        }
+        
+        .card {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .metric:last-child {
+            border-bottom: none;
+        }
+        
+        .metric-label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .metric-value {
+            font-weight: 600;
+            color: #333;
+        }
+        
+        .positive {
+            color: #28a745;
+        }
+        
+        .negative {
+            color: #dc3545;
+        }
+        
+        .stock-input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 16px;
+            margin-bottom: 15px;
+        }
+        
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            width: 100%;
+            transition: transform 0.2s;
+        }
+        
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+        
+        .chart-placeholder {
+            height: 200px;
+            background: linear-gradient(45deg, #f8f9fa, #e9ecef);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #666;
+            font-style: italic;
+        }
+        
+        #priceChart {
+            max-width: 100%;
+            height: 250px !important;
+        }
+        
+        .hidden {
+            display: none;
+        }
+        
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        
+        .portfolio-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .portfolio-item:last-child {
+            border-bottom: none;
+        }
+        
+        .stock-info {
+            flex: 1;
+        }
+        
+        .stock-ticker {
+            font-weight: 600;
+            font-size: 16px;
+        }
+        
+        .stock-shares {
+            color: #666;
+            font-size: 14px;
+        }
+        
+        .stock-value {
+            text-align: right;
+        }
+        
+        .stock-price {
+            font-weight: 600;
+            font-size: 16px;
+        }
+        
+        .stock-change {
+            font-size: 14px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📈 Financial Analyzer Pro</h1>
+            <p>Mobile Demo - Connected to Live Backend</p>
+        </div>
+        
+        <div class="nav">
+            <div class="nav-item active" onclick="showTab('dashboard')">Dashboard</div>
+            <div class="nav-item" onclick="showTab('portfolio')">Portfolio</div>
+            <div class="nav-item" onclick="showTab('analysis')">Analysis</div>
+        </div>
+        
+        <div class="content">
+            <!-- Dashboard Tab -->
+            <div id="dashboard" class="tab-content">
+                <div class="card">
+                    <h3>Market Overview</h3>
+                    <div class="metric">
+                        <span class="metric-label">S&P 500</span>
+                        <span class="metric-value">4,523.45 <span class="positive">+1.2%</span></span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">NASDAQ</span>
+                        <span class="metric-value">14,234.67 <span class="positive">+0.8%</span></span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">DOW</span>
+                        <span class="metric-value">35,123.89 <span class="negative">-0.3%</span></span>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>Quick Analysis</h3>
+                    <input type="text" class="stock-input" placeholder="Enter stock ticker (e.g., AAPL)" id="stockTicker">
+                    <button class="btn" onclick="analyzeStock()">Analyze Stock</button>
+                </div>
+                
+                <div class="card">
+                    <h3>Price Chart - AAPL</h3>
+                    <div style="position: relative; height: 250px; width: 100%;">
+                        <canvas id="priceChart"></canvas>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Portfolio Tab -->
+            <div id="portfolio" class="tab-content hidden">
+                <div class="card">
+                    <h3>Your Portfolio</h3>
+                    <div class="portfolio-item">
+                        <div class="stock-info">
+                            <div class="stock-ticker">AAPL</div>
+                            <div class="stock-shares">10 shares</div>
+                        </div>
+                        <div class="stock-value">
+                            <div class="stock-price">$1,523.40</div>
+                            <div class="stock-change positive">+$45.20 (+3.1%)</div>
+                        </div>
+                    </div>
+                    <div class="portfolio-item">
+                        <div class="stock-info">
+                            <div class="stock-ticker">MSFT</div>
+                            <div class="stock-shares">5 shares</div>
+                        </div>
+                        <div class="stock-value">
+                            <div class="stock-price">$1,487.50</div>
+                            <div class="stock-change positive">+$12.50 (+0.8%)</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>Portfolio Summary</h3>
+                    <div class="metric">
+                        <span class="metric-label">Total Value</span>
+                        <span class="metric-value">$3,010.90</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Total Gain/Loss</span>
+                        <span class="metric-value positive">+$57.70 (+1.9%)</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Positions</span>
+                        <span class="metric-value">2</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Analysis Tab -->
+            <div id="analysis" class="tab-content hidden">
+                <div class="card">
+                    <h3>Technical Analysis</h3>
+                    <div class="metric">
+                        <span class="metric-label">RSI (14)</span>
+                        <span class="metric-value">65.4</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">MACD</span>
+                        <span class="metric-value">2.34</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">SMA 20</span>
+                        <span class="metric-value">$148.50</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">SMA 50</span>
+                        <span class="metric-value">$145.20</span>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h3>ML Predictions</h3>
+                    <div class="metric">
+                        <span class="metric-label">1-Day Forecast</span>
+                        <span class="metric-value">$152.30</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">7-Day Forecast</span>
+                        <span class="metric-value">$154.80</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">30-Day Forecast</span>
+                        <span class="metric-value">$158.90</span>
+                    </div>
+                    <div class="metric">
+                        <span class="metric-label">Confidence</span>
+                        <span class="metric-value">87.5%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let priceChart = null;
+        
+        function showTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.add('hidden');
+            });
+            
+            // Remove active class from all nav items
+            document.querySelectorAll('.nav-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName).classList.remove('hidden');
+            
+            // Add active class to clicked nav item
+            event.target.classList.add('active');
+        }
+        
+        function analyzeStock() {
+            const ticker = document.getElementById('stockTicker').value;
+            if (ticker) {
+                alert(`Analyzing ${ticker.toUpperCase()}...\n\nThis would connect to your live backend at:\nhttps://financial-analyzer-pro.onrender.com\n\nFor now, showing mock data.`);
+                updateChart(ticker.toUpperCase());
+            }
+        }
+        
+        function updateChart(ticker) {
+            if (priceChart) {
+                priceChart.destroy();
+            }
+            
+            // Generate mock price data for the ticker
+            const basePrice = 150 + Math.random() * 50;
+            const data = [];
+            const labels = [];
+            let currentPrice = basePrice;
+            
+            for (let i = 30; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                labels.push(date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                // Add some realistic price movement
+                currentPrice += (Math.random() - 0.5) * 3;
+                data.push(currentPrice.toFixed(2));
+            }
+            
+            const ctx = document.getElementById('priceChart').getContext('2d');
+            priceChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${ticker} Price`,
+                        data: data,
+                        borderColor: '#667eea',
+                        backgroundColor: 'rgba(102, 126, 234, 0.1)',
+                        borderWidth: 2,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            enabled: true,
+                            mode: 'index',
+                            intersect: false
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            grid: {
+                                color: 'rgba(0,0,0,0.1)',
+                                drawBorder: false
+                            },
+                            ticks: {
+                                color: '#666',
+                                font: {
+                                    size: 12
+                                }
+                            }
+                        },
+                        x: {
+                            grid: {
+                                display: false
+                            },
+                            ticks: {
+                                color: '#666',
+                                font: {
+                                    size: 11
+                                },
+                                maxTicksLimit: 8
+                            }
+                        }
+                    },
+                    elements: {
+                        point: {
+                            radius: 0,
+                            hoverRadius: 4
+                        },
+                        line: {
+                            borderWidth: 2
+                        }
+                    },
+                    animation: {
+                        duration: 750,
+                        easing: 'easeInOutQuart'
+                    }
+                }
+            });
+        }
+        
+        // Initialize chart on page load
+        window.onload = function() {
+            updateChart('AAPL');
+        };
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            if (priceChart) {
+                priceChart.resize();
+            }
+        });
+        
+        // Simulate real-time updates
+        setInterval(() => {
+            // Update portfolio values with small random changes
+            const prices = document.querySelectorAll('.stock-price');
+            prices.forEach(price => {
+                const currentValue = parseFloat(price.textContent.replace('$', '').replace(',', ''));
+                const change = (Math.random() - 0.5) * 2;
+                const newValue = currentValue + change;
+                price.textContent = `$${newValue.toFixed(2)}`;
+            });
+            
+            // Update chart with new data point
+            if (priceChart) {
+                const data = priceChart.data.datasets[0].data;
+                const labels = priceChart.data.labels;
+                
+                // Remove first data point and add new one
+                data.shift();
+                labels.shift();
+                
+                const lastPrice = parseFloat(data[data.length - 1]);
+                const newPrice = lastPrice + (Math.random() - 0.5) * 2;
+                data.push(newPrice.toFixed(2));
+                
+                const today = new Date();
+                labels.push(today.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
+                
+                priceChart.update('none');
+            }
+        }, 3000);
+    </script>
+</body>
+</html>

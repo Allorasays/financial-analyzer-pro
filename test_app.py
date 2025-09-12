@@ -1,0 +1,6 @@
+import streamlit as st
+
+st.title("Test App")
+st.write("If you can see this, Streamlit is working!")
+st.write("This is a simple test to verify the setup.")
+
