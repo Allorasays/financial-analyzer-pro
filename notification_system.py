@@ -622,3 +622,4 @@ class RealTimeNotificationSystem:
         except Exception as e:
             st.error(f"Error running real-time checks: {str(e)}")
             return []
+

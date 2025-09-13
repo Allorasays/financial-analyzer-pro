@@ -52,3 +52,4 @@ if __name__ == "__main__":
     else:
         print("❌ Package installation failed")
         sys.exit(1)
+
