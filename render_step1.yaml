@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: financial-analyzer-step1
+    env: python
+    plan: free
+    buildCommand: pip install streamlit
+    startCommand: streamlit run app_step1_minimal.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

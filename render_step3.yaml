@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: financial-analyzer-step3
+    env: python
+    plan: free
+    buildCommand: pip install streamlit yfinance pandas plotly
+    startCommand: streamlit run app_step3_charts.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

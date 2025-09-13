@@ -1,0 +1,25 @@
+services:
+  - type: web
+    name: financial-analyzer-full
+    env: python
+    plan: free
+    buildCommand: |
+      pip install --upgrade pip
+      pip install --upgrade setuptools wheel
+      pip install streamlit==1.28.0
+      pip install pandas==2.0.3
+      pip install plotly==5.17.0
+      pip install yfinance==0.2.18
+      pip install numpy==1.24.3
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
