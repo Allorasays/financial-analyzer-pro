@@ -4,231 +4,79 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Financial Analyzer Pro</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
-            padding: 20px;
         }
-        
         .container {
             max-width: 1200px;
             margin: 0 auto;
             background: white;
-            border-radius: 15px;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
-            overflow: hidden;
-        }
-        
-        .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 40px;
-            text-align: center;
-        }
-        
-        .header h1 {
-            font-size: 3em;
-            margin-bottom: 10px;
-            font-weight: 300;
-        }
-        
-        .header p {
-            font-size: 1.2em;
-            opacity: 0.9;
-        }
-        
-        .content {
-            padding: 40px;
-        }
-        
-        .section {
-            margin-bottom: 40px;
-        }
-        
-        .section h2 {
-            color: #333;
-            margin-bottom: 20px;
-            font-size: 1.8em;
-            border-bottom: 3px solid #667eea;
-            padding-bottom: 10px;
-        }
-        
-        .input-group {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-            align-items: center;
-        }
-        
-        .input-group input {
-            flex: 1;
-            padding: 12px 15px;
-            border: 2px solid #e1e5e9;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s;
-        }
-        
-        .input-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
-        .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 8px;
-            cursor: pointer;
-            font-size: 16px;
-            font-weight: 600;
-            transition: transform 0.2s;
-        }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-        }
-        
-        .market-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 20px;
-            margin: 20px 0;
-        }
-        
-        .market-card {
-            background: #f8f9fa;
+            border-radius: 10px;
             padding: 20px;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header {
             text-align: center;
-        }
-        
-        .market-card h3 {
-            color: #333;
-            margin-bottom: 10px;
-        }
-        
-        .market-card .price {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #28a745;
-            margin-bottom: 5px;
-        }
-        
-        .market-card .change {
-            color: #666;
-            font-size: 0.9em;
-        }
-        
-        .portfolio-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-            background: white;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 2rem;
             border-radius: 10px;
-            overflow: hidden;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
         }
-        
-        .portfolio-table th {
+        .metric-card {
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            border-left: 4px solid #667eea;
+        }
+        .input-group {
+            margin: 1rem 0;
+        }
+        input, select, button {
+            padding: 10px;
+            margin: 5px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        button {
             background: #667eea;
             color: white;
-            padding: 15px;
-            text-align: left;
-            font-weight: 600;
+            border: none;
+            cursor: pointer;
+            padding: 10px 20px;
         }
-        
-        .portfolio-table td {
-            padding: 15px;
-            border-bottom: 1px solid #e1e5e9;
+        button:hover {
+            background: #5a6fd8;
         }
-        
-        .portfolio-table tr:hover {
-            background: #f8f9fa;
+        .chart-container {
+            margin: 2rem 0;
         }
-        
-        .status {
-            background: #d4edda;
-            color: #155724;
-            padding: 15px;
-            border-radius: 8px;
-            margin: 20px 0;
+        .loading {
             text-align: center;
-            font-weight: 600;
-        }
-        
-        .feature-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
-            margin: 30px 0;
-        }
-        
-        .feature-card {
-            background: #f8f9fa;
-            padding: 25px;
-            border-radius: 10px;
-            border-left: 4px solid #667eea;
-        }
-        
-        .feature-card h3 {
-            color: #333;
-            margin-bottom: 10px;
-            font-size: 1.3em;
-        }
-        
-        .feature-card p {
+            padding: 2rem;
             color: #666;
-            line-height: 1.6;
         }
-        
-        .deployment-info {
-            background: #e2e3e5;
-            padding: 25px;
-            border-radius: 10px;
-            margin: 30px 0;
-        }
-        
-        .deployment-info h3 {
-            color: #333;
-            margin-bottom: 15px;
-        }
-        
-        .code {
-            background: #f8f9fa;
-            padding: 15px;
+        .error {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 1rem;
             border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            margin: 10px 0;
-            border-left: 4px solid #667eea;
+            margin: 1rem 0;
         }
-        
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 2em;
-            }
-            
-            .content {
-                padding: 20px;
-            }
-            
-            .input-group {
-                flex-direction: column;
-            }
-            
-            .market-grid {
-                grid-template-columns: 1fr;
-            }
+        .success {
+            color: #28a745;
+            background: #d4edda;
+            padding: 1rem;
+            border-radius: 5px;
+            margin: 1rem 0;
         }
     </style>
 </head>
@@ -238,158 +86,172 @@
             <h1>📈 Financial Analyzer Pro</h1>
             <p>Advanced Financial Analysis Platform</p>
         </div>
-        
-        <div class="content">
-            <div class="status">
-                ✅ <strong>Successfully Deployed!</strong> This is a static version that works on any hosting platform.
+
+        <div class="input-group">
+            <h3>Stock Analysis</h3>
+            <input type="text" id="symbolInput" placeholder="Enter stock symbol (e.g., AAPL)" value="AAPL">
+            <select id="periodSelect">
+                <option value="1mo">1 Month</option>
+                <option value="3mo" selected>3 Months</option>
+                <option value="6mo">6 Months</option>
+                <option value="1y">1 Year</option>
+                <option value="2y">2 Years</option>
+            </select>
+            <button onclick="analyzeStock()">Analyze Stock</button>
+        </div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Loading market data...
+        </div>
+
+        <div id="error" class="error" style="display: none;"></div>
+
+        <div id="results" style="display: none;">
+            <div class="metric-card">
+                <h3>Stock Information</h3>
+                <div id="stockInfo"></div>
             </div>
-            
-            <div class="section">
-                <h2>🔍 Stock Lookup</h2>
-                <div class="input-group">
-                    <input type="text" id="symbolInput" placeholder="Enter stock symbol (e.g., AAPL)" value="AAPL">
-                    <button class="btn" onclick="lookupStock()">Get Info</button>
-                </div>
-                <div id="stockResult"></div>
+
+            <div class="chart-container">
+                <h3>Price Chart</h3>
+                <div id="chart"></div>
             </div>
-            
-            <div class="section">
-                <h2>📊 Market Overview</h2>
-                <div class="market-grid">
-                    <div class="market-card">
-                        <h3>S&P 500</h3>
-                        <div class="price">4,500.00</div>
-                        <div class="change">+54.20 (+1.22%)</div>
-                    </div>
-                    <div class="market-card">
-                        <h3>NASDAQ</h3>
-                        <div class="price">14,200.00</div>
-                        <div class="change">+112.50 (+0.80%)</div>
-                    </div>
-                    <div class="market-card">
-                        <h3>DOW</h3>
-                        <div class="price">35,000.00</div>
-                        <div class="change">+525.00 (+1.52%)</div>
-                    </div>
-                    <div class="market-card">
-                        <h3>VIX</h3>
-                        <div class="price">18.50</div>
-                        <div class="change">-1.20 (-6.09%)</div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h2>💼 Portfolio</h2>
-                <table class="portfolio-table">
-                    <thead>
-                        <tr>
-                            <th>Symbol</th>
-                            <th>Shares</th>
-                            <th>Price</th>
-                            <th>Value</th>
-                            <th>Change</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <tr>
-                            <td><strong>AAPL</strong></td>
-                            <td>10</td>
-                            <td>$150.25</td>
-                            <td>$1,502.50</td>
-                            <td style="color: #28a745;">+$52.50 (+3.6%)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>MSFT</strong></td>
-                            <td>5</td>
-                            <td>$300.50</td>
-                            <td>$1,502.50</td>
-                            <td style="color: #dc3545;">-$25.00 (-1.6%)</td>
-                        </tr>
-                        <tr>
-                            <td><strong>GOOGL</strong></td>
-                            <td>3</td>
-                            <td>$2,800.75</td>
-                            <td>$8,402.25</td>
-                            <td style="color: #28a745;">+$150.75 (+1.8%)</td>
-                        </tr>
-                    </tbody>
-                </table>
-                <div style="text-align: center; margin-top: 20px; font-size: 1.2em; font-weight: bold;">
-                    Total Portfolio Value: <span style="color: #667eea;">$11,407.25</span>
-                </div>
-            </div>
-            
-            <div class="section">
-                <h2>🚀 Features</h2>
-                <div class="feature-grid">
-                    <div class="feature-card">
-                        <h3>📊 Real-time Market Data</h3>
-                        <p>Live stock prices and market indices from major exchanges around the world.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>🔍 Advanced Stock Analysis</h3>
-                        <p>Technical indicators including RSI, MACD, moving averages, and Bollinger Bands.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>📈 Interactive Charts</h3>
-                        <p>Professional visualizations with Plotly for comprehensive data analysis.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>💼 Portfolio Management</h3>
-                        <p>Track your investments with real-time P&L calculations and performance metrics.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>⭐ Smart Watchlist</h3>
-                        <p>Monitor your favorite stocks and set price alerts for important movements.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>🌍 Global Market Overview</h3>
-                        <p>Real-time data for S&P 500, NASDAQ, DOW, VIX, and international markets.</p>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="deployment-info">
-                <h3>🎯 Deployment Success</h3>
-                <p><strong>This static version is guaranteed to work on any hosting platform!</strong></p>
-                <p>For the full interactive version with real-time data, deploy the Streamlit app using:</p>
-                <div class="code">
-                    Build Command: pip install streamlit<br>
-                    Start Command: streamlit run app_minimal.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
-                </div>
+        </div>
+
+        <div class="metric-card">
+            <h3>Market Overview</h3>
+            <p>This is a demonstration version. For full functionality with real-time data, please use the Python version.</p>
+            <div id="marketOverview">
+                <p>📊 S&P 500: $4,500.00 (+0.5%)</p>
+                <p>📈 NASDAQ: $14,200.00 (+0.8%)</p>
+                <p>📉 DOW: $35,000.00 (+0.3%)</p>
+                <p>⚠️ VIX: $18.50 (-2.1%)</p>
             </div>
         </div>
     </div>
-    
+
     <script>
-        function lookupStock() {
+        async function analyzeStock() {
             const symbol = document.getElementById('symbolInput').value.toUpperCase();
-            const resultDiv = document.getElementById('stockResult');
+            const period = document.getElementById('periodSelect').value;
             
-            if (symbol) {
-                resultDiv.innerHTML = `
-                    <div style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin-top: 10px;">
-                        <h3>📈 ${symbol} Stock Information</h3>
-                        <p><strong>Current Price:</strong> $150.25</p>
-                        <p><strong>Change:</strong> +$2.50 (+1.69%)</p>
-                        <p><strong>Volume:</strong> 45,230,000</p>
-                        <p><strong>Market Cap:</strong> $2.4T</p>
-                        <p><em>Note: This is a demo version. Real-time data requires the full Streamlit app.</em></p>
-                    </div>
-                `;
+            if (!symbol) {
+                showError('Please enter a stock symbol');
+                return;
+            }
+
+            showLoading();
+            hideError();
+            hideResults();
+
+            try {
+                // Simulate API call - in real implementation, this would call your backend
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                
+                // Mock data for demonstration
+                const mockData = generateMockData(symbol, period);
+                displayResults(symbol, mockData);
+                
+            } catch (error) {
+                showError('Error analyzing stock: ' + error.message);
+            } finally {
+                hideLoading();
             }
         }
-        
-        // Auto-lookup on Enter key
-        document.getElementById('symbolInput').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                lookupStock();
+
+        function generateMockData(symbol, period) {
+            // Generate mock price data
+            const days = period === '1mo' ? 30 : period === '3mo' ? 90 : period === '6mo' ? 180 : 365;
+            const data = [];
+            let basePrice = 150 + Math.random() * 100;
+            
+            for (let i = days; i >= 0; i--) {
+                const date = new Date();
+                date.setDate(date.getDate() - i);
+                
+                const change = (Math.random() - 0.5) * 0.05;
+                basePrice *= (1 + change);
+                
+                data.push({
+                    date: date.toISOString().split('T')[0],
+                    close: basePrice,
+                    high: basePrice * (1 + Math.random() * 0.02),
+                    low: basePrice * (1 - Math.random() * 0.02),
+                    volume: Math.floor(Math.random() * 1000000) + 100000
+                });
             }
-        });
-        
+            
+            return data;
+        }
+
+        function displayResults(symbol, data) {
+            const currentPrice = data[data.length - 1].close;
+            const previousPrice = data[data.length - 2].close;
+            const change = currentPrice - previousPrice;
+            const changePercent = (change / previousPrice) * 100;
+            
+            // Display stock info
+            document.getElementById('stockInfo').innerHTML = `
+                <p><strong>Symbol:</strong> ${symbol}</p>
+                <p><strong>Current Price:</strong> $${currentPrice.toFixed(2)}</p>
+                <p><strong>Change:</strong> <span style="color: ${change >= 0 ? '#28a745' : '#dc3545'}">$${change.toFixed(2)} (${changePercent.toFixed(2)}%)</span></p>
+                <p><strong>Volume:</strong> ${data[data.length - 1].volume.toLocaleString()}</p>
+            `;
+            
+            // Create chart
+            const chartData = [{
+                x: data.map(d => d.date),
+                y: data.map(d => d.close),
+                type: 'scatter',
+                mode: 'lines',
+                name: 'Price',
+                line: { color: '#667eea', width: 2 }
+            }];
+            
+            const layout = {
+                title: `${symbol} Price Chart`,
+                xaxis: { title: 'Date' },
+                yaxis: { title: 'Price ($)' },
+                height: 500,
+                showlegend: true
+            };
+            
+            Plotly.newPlot('chart', chartData, layout);
+            
+            showResults();
+        }
+
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function showError(message) {
+            document.getElementById('error').textContent = message;
+            document.getElementById('error').style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('error').style.display = 'none';
+        }
+
+        function showResults() {
+            document.getElementById('results').style.display = 'block';
+        }
+
+        function hideResults() {
+            document.getElementById('results').style.display = 'none';
+        }
+
         // Initialize with AAPL data
-        lookupStock();
+        window.onload = function() {
+            analyzeStock();
+        };
     </script>
 </body>
 </html>
+
+
