@@ -1,10 +1,14 @@
 services:
   - type: web
-    name: financial-analyzer-ultra-minimal
+    name: financial-analyzer-fixed
     env: python
     plan: free
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements_ultra_minimal.txt --no-cache-dir
+    buildCommand: chmod +x build_script.sh && ./build_script.sh
     startCommand: streamlit run app_ultra_minimal.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0

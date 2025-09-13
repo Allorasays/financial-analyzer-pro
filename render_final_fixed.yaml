@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: financial-analyzer-ultra-minimal
+    name: financial-analyzer-final
     env: python
     plan: free
-    buildCommand: pip install --upgrade pip setuptools wheel && pip install -r requirements_ultra_minimal.txt --no-cache-dir
+    buildCommand: pip install --upgrade pip setuptools wheel && pip install streamlit pandas yfinance numpy
     startCommand: streamlit run app_ultra_minimal.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
