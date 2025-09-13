@@ -1,6 +1,14 @@
+<<<<<<< Updated upstream
 streamlit
 pandas
 plotly
 yfinance
 numpy
+=======
+streamlit
+pandas
+plotly
+yfinance
+numpy
+>>>>>>> Stashed changes
 requests

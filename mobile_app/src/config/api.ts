@@ -10,11 +10,11 @@ export const API_CONFIG = {
     device: 'http://192.168.1.100:8000', // Change this to your actual IP
   },
   
-  // Production URL (when you deploy your backend)
-  production: 'https://your-backend-url.com',
+  // Production URL (your live Render backend)
+  production: 'https://financial-analyzer-pro.onrender.com',
   
   // Current environment
-  current: 'development' as keyof typeof API_CONFIG,
+  current: 'production' as keyof typeof API_CONFIG,
 };
 
 // Get the appropriate API URL based on platform

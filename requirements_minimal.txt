@@ -1,3 +1,4 @@
+<<<<<<< Updated upstream
 streamlit
 pandas
 plotly
@@ -5,4 +6,13 @@ yfinance
 numpy
 scikit-learn
 scipy
+=======
+streamlit
+pandas
+plotly
+yfinance
+numpy
+scikit-learn
+scipy
+>>>>>>> Stashed changes
 requests

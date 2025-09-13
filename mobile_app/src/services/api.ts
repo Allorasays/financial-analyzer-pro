@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { getApiUrl } from '../config/api';
+import { mockApiService } from './mockApi';
 
 // Create axios instance with base configuration
 export const api = axios.create({
@@ -72,54 +73,43 @@ export const endpoints = {
   },
 };
 
-// API functions
+// API functions - Using mock data for now
 export const apiService = {
   // Market data
   getRealtimeData: async (ticker: string) => {
-    const response = await api.get(endpoints.market.realtime(ticker));
-    return response.data;
+    // For now, use mock data. Later we'll connect to real API
+    return await mockApiService.getRealtimeData(ticker);
   },
   
   getMarketOverview: async () => {
-    const response = await api.get(endpoints.market.overview);
-    return response.data;
+    return await mockApiService.getMarketOverview();
   },
   
   // Technical analysis
   getTechnicalAnalysis: async (ticker: string, period: string = '1y') => {
-    const response = await api.get(endpoints.technical(ticker, period));
-    return response.data;
+    return await mockApiService.getTechnicalAnalysis(ticker, period);
   },
   
   // ML predictions
   getMLPredictions: async (ticker: string, days: number = 30) => {
-    const response = await api.get(endpoints.ml.predictions(ticker, days));
-    return response.data;
+    return await mockApiService.getMLPredictions(ticker, days);
   },
   
   // Portfolio
   getPortfolio: async () => {
-    const response = await api.get(endpoints.portfolio.get);
-    return response.data;
+    return await mockApiService.getPortfolio();
   },
   
   addToPortfolio: async (ticker: string, shares: number, avgPrice: number) => {
-    const response = await api.post(endpoints.portfolio.add, {
-      ticker,
-      shares,
-      avg_price: avgPrice,
-    });
-    return response.data;
+    return await mockApiService.addToPortfolio(ticker, shares, avgPrice);
   },
   
   // Watchlist
   getWatchlist: async () => {
-    const response = await api.get(endpoints.watchlist.get);
-    return response.data;
+    return await mockApiService.getWatchlist();
   },
   
   addToWatchlist: async (ticker: string) => {
-    const response = await api.post(endpoints.watchlist.add, { ticker });
-    return response.data;
+    return await mockApiService.addToWatchlist(ticker);
   },
 };
