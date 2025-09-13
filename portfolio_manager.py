@@ -530,3 +530,4 @@ class EnhancedPortfolioManager:
         except Exception as e:
             st.error(f"Error checking alerts: {str(e)}")
             return []
+

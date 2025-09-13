@@ -825,3 +825,4 @@ class AdvancedFinancialAnalytics:
             st.error("**Poor Investment Case**: High downside risk or high risk profile. Consider avoiding or reducing position.")
         else:
             st.info("**Neutral Investment Case**: Mixed signals. Monitor closely before making investment decisions.")
+
