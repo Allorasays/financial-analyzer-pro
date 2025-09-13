@@ -3,13 +3,8 @@ services:
     name: financial-analyzer-minimal
     env: python
     plan: free
-    buildCommand: pip install -r requirements_minimal.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    buildCommand: pip install streamlit
+    startCommand: streamlit run app_minimal.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
-      - key: STREAMLIT_SERVER_HEADLESS
-        value: true
-      - key: STREAMLIT_SERVER_ADDRESS
-        value: 0.0.0.0
-
