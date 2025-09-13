@@ -47,3 +47,4 @@ st.dataframe(portfolio_data, width='stretch')
 # Status
 st.success("✅ Step 1 Complete: Minimal Streamlit app working!")
 st.info("Next: Add real market data with yfinance")
+

@@ -531,3 +531,4 @@ class EnhancedPortfolioManager:
             st.error(f"Error checking alerts: {str(e)}")
             return []
 
+

@@ -15,3 +15,4 @@ echo "✅ Verifying installation..."
 python -c "import streamlit; import pandas; import yfinance; import numpy; print('All packages imported successfully!')"
 
 echo "🎉 Build completed successfully!"
+
