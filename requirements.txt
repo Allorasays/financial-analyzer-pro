@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 streamlit==1.28.0
 pandas==2.0.3
 plotly==5.17.0
@@ -17,3 +18,16 @@ passlib[bcrypt]==1.7.4
 bcrypt==4.0.1
 PyJWT==2.8.0
 python-dotenv==1.0.0
+=======
+streamlit==1.28.0
+pandas==2.0.3
+plotly==5.17.0
+yfinance==0.2.18
+numpy==1.24.3
+scikit-learn==1.3.0
+scipy==1.11.1
+requests==2.31.0
+urllib3==2.0.4
+python-dateutil==2.8.2
+pytz==2023.3
+>>>>>>> c8859b9cd29cdf6529310d719fad9565979867df

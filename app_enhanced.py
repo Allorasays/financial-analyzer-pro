@@ -1,12 +1,15 @@
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
+import plotly.express as px
 import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
+import json
 import sqlite3
 from typing import Dict, List, Optional
-import os
+import requests
+import time
 
 # Page config
 st.set_page_config(
@@ -51,47 +54,44 @@ class FinancialAnalyzer:
     
     def init_database(self):
         """Initialize SQLite database for user data"""
-        try:
-            conn = sqlite3.connect('financial_analyzer.db')
-            cursor = conn.cursor()
-            
-            # Create tables
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE,
-                    email TEXT UNIQUE,
-                    password_hash TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS portfolios (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    symbol TEXT,
-                    shares REAL,
-                    purchase_price REAL,
-                    purchase_date DATE,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
-            
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS watchlists (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    user_id INTEGER,
-                    symbol TEXT,
-                    added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (user_id) REFERENCES users (id)
-                )
-            ''')
-            
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            st.error(f"Database initialization error: {str(e)}")
+        conn = sqlite3.connect('financial_analyzer.db')
+        cursor = conn.cursor()
+        
+        # Create tables
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE,
+                email TEXT UNIQUE,
+                password_hash TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                symbol TEXT,
+                shares REAL,
+                purchase_price REAL,
+                purchase_date DATE,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS watchlists (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER,
+                symbol TEXT,
+                added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users (id)
+            )
+        ''')
+        
+        conn.commit()
+        conn.close()
     
     def get_market_data(self, symbol: str, period: str = "1mo") -> Optional[pd.DataFrame]:
         """Get real market data using yfinance"""
@@ -110,47 +110,43 @@ class FinancialAnalyzer:
         if data.empty:
             return {}
         
-        try:
-            # Simple Moving Averages
-            data['SMA_20'] = data['Close'].rolling(window=20).mean()
-            data['SMA_50'] = data['Close'].rolling(window=50).mean()
-            
-            # RSI
-            delta = data['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            rsi = 100 - (100 / (1 + rs))
-            
-            # MACD
-            exp1 = data['Close'].ewm(span=12).mean()
-            exp2 = data['Close'].ewm(span=26).mean()
-            macd = exp1 - exp2
-            signal = macd.ewm(span=9).mean()
-            histogram = macd - signal
-            
-            # Bollinger Bands
-            bb_period = 20
-            bb_std = 2
-            data['BB_Middle'] = data['Close'].rolling(window=bb_period).mean()
-            bb_std_dev = data['Close'].rolling(window=bb_period).std()
-            data['BB_Upper'] = data['BB_Middle'] + (bb_std_dev * bb_std)
-            data['BB_Lower'] = data['BB_Middle'] - (bb_std_dev * bb_std)
-            
-            return {
-                'rsi': rsi.iloc[-1] if not rsi.empty and not pd.isna(rsi.iloc[-1]) else None,
-                'macd': macd.iloc[-1] if not macd.empty and not pd.isna(macd.iloc[-1]) else None,
-                'macd_signal': signal.iloc[-1] if not signal.empty and not pd.isna(signal.iloc[-1]) else None,
-                'macd_histogram': histogram.iloc[-1] if not histogram.empty and not pd.isna(histogram.iloc[-1]) else None,
-                'sma_20': data['SMA_20'].iloc[-1] if not data['SMA_20'].empty and not pd.isna(data['SMA_20'].iloc[-1]) else None,
-                'sma_50': data['SMA_50'].iloc[-1] if not data['SMA_50'].empty and not pd.isna(data['SMA_50'].iloc[-1]) else None,
-                'bb_upper': data['BB_Upper'].iloc[-1] if not data['BB_Upper'].empty and not pd.isna(data['BB_Upper'].iloc[-1]) else None,
-                'bb_middle': data['BB_Middle'].iloc[-1] if not data['BB_Middle'].empty and not pd.isna(data['BB_Middle'].iloc[-1]) else None,
-                'bb_lower': data['BB_Lower'].iloc[-1] if not data['BB_Lower'].empty and not pd.isna(data['BB_Lower'].iloc[-1]) else None
-            }
-        except Exception as e:
-            st.error(f"Error calculating technical indicators: {str(e)}")
-            return {}
+        # Simple Moving Averages
+        data['SMA_20'] = data['Close'].rolling(window=20).mean()
+        data['SMA_50'] = data['Close'].rolling(window=50).mean()
+        
+        # RSI
+        delta = data['Close'].diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        
+        # MACD
+        exp1 = data['Close'].ewm(span=12).mean()
+        exp2 = data['Close'].ewm(span=26).mean()
+        macd = exp1 - exp2
+        signal = macd.ewm(span=9).mean()
+        histogram = macd - signal
+        
+        # Bollinger Bands
+        bb_period = 20
+        bb_std = 2
+        data['BB_Middle'] = data['Close'].rolling(window=bb_period).mean()
+        bb_std_dev = data['Close'].rolling(window=bb_period).std()
+        data['BB_Upper'] = data['BB_Middle'] + (bb_std_dev * bb_std)
+        data['BB_Lower'] = data['BB_Middle'] - (bb_std_dev * bb_std)
+        
+        return {
+            'rsi': rsi.iloc[-1] if not rsi.empty else None,
+            'macd': macd.iloc[-1] if not macd.empty else None,
+            'macd_signal': signal.iloc[-1] if not signal.empty else None,
+            'macd_histogram': histogram.iloc[-1] if not histogram.empty else None,
+            'sma_20': data['SMA_20'].iloc[-1] if not data['SMA_20'].empty else None,
+            'sma_50': data['SMA_50'].iloc[-1] if not data['SMA_50'].empty else None,
+            'bb_upper': data['BB_Upper'].iloc[-1] if not data['BB_Upper'].empty else None,
+            'bb_middle': data['BB_Middle'].iloc[-1] if not data['BB_Middle'].empty else None,
+            'bb_lower': data['BB_Lower'].iloc[-1] if not data['BB_Lower'].empty else None
+        }
     
     def get_market_overview(self) -> Dict:
         """Get market overview data"""
@@ -163,7 +159,7 @@ class FinancialAnalyzer:
                 info = ticker.info
                 hist = ticker.history(period="2d")
                 
-                if not hist.empty and len(hist) >= 2:
+                if not hist.empty:
                     current_price = hist['Close'].iloc[-1]
                     previous_price = hist['Close'].iloc[-2]
                     change = current_price - previous_price
@@ -176,7 +172,7 @@ class FinancialAnalyzer:
                         'name': info.get('longName', symbol)
                     }
             except Exception as e:
-                st.warning(f"Could not fetch {symbol}: {str(e)}")
+                st.error(f"Error fetching {symbol}: {str(e)}")
         
         return overview
     
@@ -194,7 +190,7 @@ class FinancialAnalyzer:
         ))
         
         # Moving averages
-        if 'SMA_20' in data.columns and not data['SMA_20'].isna().all():
+        if 'SMA_20' in data.columns:
             fig.add_trace(go.Scatter(
                 x=data.index,
                 y=data['SMA_20'],
@@ -203,7 +199,7 @@ class FinancialAnalyzer:
                 line=dict(color='orange', width=1, dash='dash')
             ))
         
-        if 'SMA_50' in data.columns and not data['SMA_50'].isna().all():
+        if 'SMA_50' in data.columns:
             fig.add_trace(go.Scatter(
                 x=data.index,
                 y=data['SMA_50'],
@@ -214,25 +210,24 @@ class FinancialAnalyzer:
         
         # Bollinger Bands
         if all(col in data.columns for col in ['BB_Upper', 'BB_Middle', 'BB_Lower']):
-            if not data['BB_Upper'].isna().all():
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['BB_Upper'],
-                    mode='lines',
-                    name='BB Upper',
-                    line=dict(color='gray', width=1),
-                    showlegend=False
-                ))
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['BB_Lower'],
-                    mode='lines',
-                    name='BB Lower',
-                    line=dict(color='gray', width=1),
-                    fill='tonexty',
-                    fillcolor='rgba(128,128,128,0.1)',
-                    showlegend=False
-                ))
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['BB_Upper'],
+                mode='lines',
+                name='BB Upper',
+                line=dict(color='gray', width=1),
+                showlegend=False
+            ))
+            fig.add_trace(go.Scatter(
+                x=data.index,
+                y=data['BB_Lower'],
+                mode='lines',
+                name='BB Lower',
+                line=dict(color='gray', width=1),
+                fill='tonexty',
+                fillcolor='rgba(128,128,128,0.1)',
+                showlegend=False
+            ))
         
         fig.update_layout(
             title=f"{symbol} Price Chart",
@@ -266,49 +261,46 @@ def main():
         
         # Market Overview
         st.subheader("Market Overview")
-        with st.spinner("Loading market data..."):
-            overview = analyzer.get_market_overview()
+        overview = analyzer.get_market_overview()
         
-        if overview:
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                if '^GSPC' in overview:
-                    data = overview['^GSPC']
-                    st.metric(
-                        "S&P 500",
-                        f"${data['price']:.2f}",
-                        f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
-                    )
-            
-            with col2:
-                if '^IXIC' in overview:
-                    data = overview['^IXIC']
-                    st.metric(
-                        "NASDAQ",
-                        f"${data['price']:.2f}",
-                        f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
-                    )
-            
-            with col3:
-                if '^DJI' in overview:
-                    data = overview['^DJI']
-                    st.metric(
-                        "DOW",
-                        f"${data['price']:.2f}",
-                        f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
-                    )
-            
-            with col4:
-                if '^VIX' in overview:
-                    data = overview['^VIX']
-                    st.metric(
-                        "VIX",
-                        f"{data['price']:.2f}",
-                        f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
-                    )
-        else:
-            st.warning("Unable to load market data. Please try again later.")
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if '^GSPC' in overview:
+                data = overview['^GSPC']
+                change_class = "positive" if data['change'] >= 0 else "negative"
+                st.metric(
+                    "S&P 500",
+                    f"${data['price']:.2f}",
+                    f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
+                )
+        
+        with col2:
+            if '^IXIC' in overview:
+                data = overview['^IXIC']
+                st.metric(
+                    "NASDAQ",
+                    f"${data['price']:.2f}",
+                    f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
+                )
+        
+        with col3:
+            if '^DJI' in overview:
+                data = overview['^DJI']
+                st.metric(
+                    "DOW",
+                    f"${data['price']:.2f}",
+                    f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
+                )
+        
+        with col4:
+            if '^VIX' in overview:
+                data = overview['^VIX']
+                st.metric(
+                    "VIX",
+                    f"{data['price']:.2f}",
+                    f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)"
+                )
         
         # Quick Analysis
         st.subheader("Quick Stock Analysis")
@@ -462,21 +454,18 @@ def main():
         st.header("🌍 Market Overview")
         
         # Real-time market data
-        with st.spinner("Loading market data..."):
-            overview = analyzer.get_market_overview()
+        overview = analyzer.get_market_overview()
         
-        if overview:
-            for symbol, data in overview.items():
-                with st.expander(f"{data['name']} ({symbol})"):
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Price", f"${data['price']:.2f}")
-                    with col2:
-                        st.metric("Change", f"${data['change']:+.2f}")
-                    with col3:
-                        st.metric("Change %", f"{data['change_percent']:+.2f}%")
-        else:
-            st.warning("Unable to load market data. Please try again later.")
+        for symbol, data in overview.items():
+            with st.expander(f"{data['name']} ({symbol})"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Price", f"${data['price']:.2f}")
+                with col2:
+                    st.metric("Change", f"${data['change']:+.2f}")
+                with col3:
+                    st.metric("Change %", f"{data['change_percent']:+.2f}%")
 
 if __name__ == "__main__":
     main()
+
