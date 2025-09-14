@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: financial-analyzer-phase2
+    env: python
+    plan: free
+    buildCommand: pip install streamlit pandas yfinance plotly --no-cache-dir
+    startCommand: python -m streamlit run app_phase2_basic.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: PORT
+        value: 8501
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
