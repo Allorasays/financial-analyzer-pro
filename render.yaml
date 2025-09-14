@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: financial-analyzer-phase3
+    name: financial-analyzer-phase4
     env: python
     plan: free
-    buildCommand: pip install streamlit pandas yfinance plotly numpy scipy --no-cache-dir
-    startCommand: python -m streamlit run app_phase3_analytics.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    buildCommand: pip install streamlit pandas yfinance plotly numpy scipy scikit-learn --no-cache-dir
+    startCommand: python -m streamlit run app_phase4_ml.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
