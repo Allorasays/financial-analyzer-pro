@@ -325,4 +325,8 @@ def main():
                         st.error(f"Could not fetch data for {symbol}")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        st.error(f"App startup error: {str(e)}")
+        st.write("Please check the logs for more details.")
