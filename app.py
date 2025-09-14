@@ -44,10 +44,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Cache configuration
-@st.cache_data(ttl=300)  # Cache for 5 minutes
-def get_market_data_cached(symbol: str, period: str = "1mo") -> Optional[pd.DataFrame]:
-    """Cached version of market data fetching"""
+def get_market_data(symbol: str, period: str = "1mo") -> Optional[pd.DataFrame]:
+    """Get market data using yfinance"""
     try:
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period)
@@ -58,9 +56,8 @@ def get_market_data_cached(symbol: str, period: str = "1mo") -> Optional[pd.Data
         st.error(f"Error fetching data for {symbol}: {str(e)}")
         return None
 
-@st.cache_data(ttl=600)  # Cache for 10 minutes
-def get_market_overview_cached() -> Dict:
-    """Cached market overview data"""
+def get_market_overview() -> Dict:
+    """Get market overview data"""
     symbols = ['^GSPC', '^IXIC', '^DJI', '^VIX']
     overview = {}
     
@@ -86,9 +83,8 @@ def get_market_overview_cached() -> Dict:
     
     return overview
 
-@st.cache_data(ttl=300)
-def calculate_technical_indicators_cached(data: pd.DataFrame) -> Dict:
-    """Cached technical indicators calculation"""
+def calculate_technical_indicators(data: pd.DataFrame) -> Dict:
+    """Calculate technical indicators"""
     if data.empty:
         return {}
     
@@ -146,7 +142,7 @@ def main():
     st.markdown("""
     <div class="main-header">
         <h1>📈 Financial Analyzer Pro</h1>
-        <p>Optimized Financial Analysis Platform</p>
+        <p>Fixed Version - No Caching Issues</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -159,10 +155,10 @@ def main():
     if page == "Dashboard":
         st.header("📊 Dashboard")
         
-        # Market Overview (cached)
+        # Market Overview
         st.subheader("Market Overview")
         with st.spinner("Loading market data..."):
-            overview = get_market_overview_cached()
+            overview = get_market_overview()
         
         if overview:
             col1, col2, col3, col4 = st.columns(4)
@@ -212,7 +208,7 @@ def main():
         if st.button("Analyze Stock"):
             if symbol:
                 with st.spinner(f"Analyzing {symbol}..."):
-                    data = get_market_data_cached(symbol, "1mo")
+                    data = get_market_data(symbol, "1mo")
                     if data is not None and not data.empty:
                         # Current price info
                         current_price = data['Close'].iloc[-1]
@@ -229,7 +225,7 @@ def main():
                             st.metric("Change %", f"{change_percent:+.2f}%")
                         
                         # Simple technical indicators
-                        indicators = calculate_technical_indicators_cached(data)
+                        indicators = calculate_technical_indicators(data)
                         
                         st.subheader("Technical Analysis")
                         col1, col2, col3 = st.columns(3)
@@ -260,7 +256,7 @@ def main():
         if st.button("Analyze"):
             if symbol:
                 with st.spinner(f"Analyzing {symbol}..."):
-                    data = get_market_data_cached(symbol, period)
+                    data = get_market_data(symbol, period)
                     if data is not None and not data.empty:
                         # Price information
                         current_price = data['Close'].iloc[-1]
@@ -279,7 +275,7 @@ def main():
                             st.metric("Volume", f"{volume:,}")
                         
                         # Technical indicators
-                        indicators = calculate_technical_indicators_cached(data)
+                        indicators = calculate_technical_indicators(data)
                         
                         st.subheader("Technical Indicators")
                         col1, col2 = st.columns(2)
@@ -313,7 +309,7 @@ def main():
         if st.button("Get Quote"):
             if symbol:
                 with st.spinner(f"Getting quote for {symbol}..."):
-                    data = get_market_data_cached(symbol, "5d")
+                    data = get_market_data(symbol, "5d")
                     if data is not None and not data.empty:
                         current_price = data['Close'].iloc[-1]
                         previous_price = data['Close'].iloc[-2]
