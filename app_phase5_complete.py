@@ -821,10 +821,31 @@ elif analysis_tab == "🔧 Technical Indicators":
                 
                 # RSI Chart
                 st.subheader("RSI Chart")
+                
+                # Calculate RSI properly
+                def calculate_rsi(prices, window=14):
+                    try:
+                        delta = prices.diff()
+                        gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+                        loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+                        rs = gain / loss
+                        rsi = 100 - (100 / (1 + rs))
+                        return rsi
+                    except Exception as e:
+                        st.warning(f"Error calculating RSI: {str(e)}")
+                        return pd.Series([50] * len(prices), index=prices.index)  # Return neutral RSI
+                
+                rsi_values = calculate_rsi(data['Close'])
+                
                 fig_rsi = go.Figure()
+                
+                # Clean RSI values for plotting
+                clean_rsi = rsi_values.fillna(50)  # Fill NaN values with neutral RSI
+                clean_rsi = clean_rsi.replace([np.inf, -np.inf], 50)  # Replace infinite values
+                
                 fig_rsi.add_trace(go.Scatter(
                     x=data.index,
-                    y=data['Close'].rolling(window=14).apply(lambda x: 100 - (100 / (1 + (x.diff().where(x.diff() > 0, 0).rolling(14).mean() / (-x.diff().where(x.diff() < 0, 0).rolling(14).mean()))))),
+                    y=clean_rsi,
                     mode='lines',
                     name='RSI',
                     line=dict(color='purple', width=2)
