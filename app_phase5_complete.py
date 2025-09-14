@@ -7,10 +7,22 @@ import numpy as np
 from datetime import datetime, timedelta
 import time
 from typing import Dict, List, Optional
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import mean_squared_error, r2_score
-from scipy import stats
+try:
+    from sklearn.linear_model import LinearRegression
+    from sklearn.preprocessing import StandardScaler
+    from sklearn.metrics import mean_squared_error, r2_score
+    SKLEARN_AVAILABLE = True
+except ImportError:
+    SKLEARN_AVAILABLE = False
+    st.warning("⚠️ scikit-learn not available. ML features will be limited.")
+
+try:
+    from scipy import stats
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    st.warning("⚠️ scipy not available. Some advanced features will be limited.")
+
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -307,6 +319,10 @@ def prepare_ml_features(data: pd.DataFrame) -> tuple:
 
 def train_price_prediction_model(X, y):
     """Train ML model for price prediction"""
+    if not SKLEARN_AVAILABLE:
+        st.warning("⚠️ scikit-learn not available. Using simple linear regression.")
+        return None, None, None, None, None, None
+    
     try:
         # Split data
         split_idx = int(len(X) * 0.8)
@@ -340,17 +356,22 @@ def detect_anomalies(data: pd.DataFrame) -> tuple:
         # Calculate returns
         returns = data['Close'].pct_change().dropna()
         
-        # Z-score method
-        z_scores = np.abs(stats.zscore(returns))
-        threshold = 2.5
-        
-        anomalies = data[z_scores > threshold]
-        
-        # Isolation Forest method (simplified)
-        mean_return = returns.mean()
-        std_return = returns.std()
+        if SCIPY_AVAILABLE:
+            # Z-score method using scipy
+            z_scores = np.abs(stats.zscore(returns))
+            threshold = 2.5
+            anomalies = data[z_scores > threshold]
+        else:
+            # Simple method without scipy
+            mean_return = returns.mean()
+            std_return = returns.std()
+            z_scores = np.abs((returns - mean_return) / std_return)
+            threshold = 2.5
+            anomalies = data[z_scores > threshold]
         
         # Mark extreme returns
+        mean_return = returns.mean()
+        std_return = returns.std()
         extreme_returns = returns[np.abs(returns - mean_return) > 2 * std_return]
         
         return anomalies, extreme_returns
