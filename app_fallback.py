@@ -25,34 +25,6 @@ try:
 except ImportError:
     SCIPY_AVAILABLE = False
 
-# Phase 3 imports with graceful fallbacks
-try:
-    from database_manager import DatabaseManager
-    from auth_system import AuthSystem
-    from portfolio_persistence import PortfolioPersistence
-    PHASE3_AVAILABLE = True
-except ImportError as e:
-    PHASE3_AVAILABLE = False
-    st.warning(f"⚠️ Phase 3 features not available: {str(e)}")
-    
-    # Create dummy classes for fallback
-    class DatabaseManager:
-        def __init__(self): pass
-        def get_database_stats(self): return {}
-    
-    class AuthSystem:
-        def __init__(self): pass
-        def is_authenticated(self): return False
-        def get_current_user(self): return None
-        def get_user_preferences(self): return {'theme': 'light', 'default_timeframe': '1mo', 'default_symbols': ['AAPL', 'MSFT', 'GOOGL']}
-        def show_optional_auth_header(self): pass
-        def show_auth_prompt(self, feature): st.warning(f"🔐 {feature} requires an account. Please sign in to access this feature.")
-    
-    class PortfolioPersistence:
-        def __init__(self): pass
-        def show_portfolio_manager(self): st.warning("🔐 Portfolio Manager requires an account. Please sign in to access this feature.")
-        def show_watchlist_manager(self): st.warning("🔐 Watchlist Manager requires an account. Please sign in to access this feature.")
-
 # Page config - moved to top to avoid issues
 st.set_page_config(
     page_title="Financial Analyzer Pro - Research & Analysis",
@@ -122,27 +94,8 @@ st.markdown("""
         margin-bottom: 1rem;
         border-left: 5px solid #ffc107;
     }
-    .user-welcome {
-        background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
-        padding: 1rem;
-        border-radius: 10px;
-        color: white;
-        margin-bottom: 1rem;
-    }
-    .database-card {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        padding: 1.5rem;
-        border-radius: 10px;
-        color: white;
-        margin: 1rem 0;
-    }
 </style>
 """, unsafe_allow_html=True)
-
-# Initialize systems
-db = DatabaseManager()
-auth = AuthSystem()
-portfolio_persistence = PortfolioPersistence()
 
 def get_market_data(symbol: str, period: str = "1mo"):
     """Get market data using yfinance with enhanced error handling"""
@@ -422,66 +375,20 @@ def main():
     """, unsafe_allow_html=True)
     
     # Phase indicator
-    if auth.is_authenticated():
-        st.markdown("""
-        <div class="phase-indicator">
-            <h3>🚀 Phase 3 Features Active</h3>
-            <p>✅ User Authentication | ✅ Portfolio Persistence | ✅ User Preferences | ✅ Database Integration | ✅ Personalized Experience</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="phase-indicator">
-            <h3>🔍 Research Mode</h3>
-            <p>✅ ML Stock Analysis | ✅ Anomaly Detection | ✅ Risk Assessment | ✅ Market Overview | 🔐 Sign in for Portfolio Management</p>
-        </div>
-        """, unsafe_allow_html=True)
+    st.markdown("""
+    <div class="phase-indicator">
+        <h3>🔍 Research Mode</h3>
+        <p>✅ ML Stock Analysis | ✅ Anomaly Detection | ✅ Risk Assessment | ✅ Market Overview</p>
+    </div>
+    """, unsafe_allow_html=True)
     
-    # Handle optional authentication
-    if hasattr(st.session_state, 'show_login') and st.session_state.show_login:
-        auth.show_login_page()
-        return
-    
-    if hasattr(st.session_state, 'show_register') and st.session_state.show_register:
-        auth.show_register_page()
-        return
-    
-    # User welcome
-    if auth.is_authenticated():
-        user = auth.get_current_user()
-        st.markdown(f"""
-        <div class="user-welcome">
-            <h4>👤 Welcome back, {user['full_name'] or user['username']}!</h4>
-            <p>Your personalized financial analysis platform is ready.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="user-welcome">
-            <h4>🔍 Financial Research Platform</h4>
-            <p>Analyze stocks, detect anomalies, and assess risk. Sign in to save portfolios and access personalized features.</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Database status
-    if PHASE3_AVAILABLE:
-        db_stats = db.get_database_stats()
-        st.markdown(f"""
-        <div class="database-card">
-            <h4>🗄️ Database Status</h4>
-            <p><strong>Users:</strong> {db_stats.get('users_count', 0)} | 
-            <strong>Portfolios:</strong> {db_stats.get('portfolios_count', 0)} | 
-            <strong>Watchlists:</strong> {db_stats.get('watchlists_count', 0)} | 
-            <strong>Active Sessions:</strong> {db_stats.get('active_sessions_count', 0)}</p>
-        </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("""
-        <div class="database-card">
-            <h4>🔍 Research Mode</h4>
-            <p><strong>Status:</strong> Guest Mode | <strong>Features:</strong> ML Analysis, Risk Assessment, Market Overview</p>
-        </div>
-        """, unsafe_allow_html=True)
+    # Welcome message
+    st.markdown("""
+    <div class="user-welcome">
+        <h4>🔍 Financial Research Platform</h4>
+        <p>Analyze stocks, detect anomalies, and assess risk with advanced AI-powered tools.</p>
+    </div>
+    """, unsafe_allow_html=True)
     
     # ML Status
     ml_status = "🟢 Full ML Features Available" if SKLEARN_AVAILABLE else "🟡 Limited ML Features (scikit-learn not available)"
@@ -493,33 +400,14 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # Optional authentication header
-    auth.show_optional_auth_header()
-    
     # Main navigation
     st.sidebar.title("📊 Analysis Tools")
-    
-    # Different navigation options based on authentication status
-    if auth.is_authenticated():
-        page = st.sidebar.selectbox("Choose Analysis", [
-            "📈 ML Stock Analysis", 
-            "🔍 Anomaly Detection", 
-            "📊 Risk Assessment",
-            "💼 Portfolio Manager",
-            "👀 Watchlist Manager",
-            "📊 Market Overview",
-            "⚙️ Settings"
-        ])
-    else:
-        page = st.sidebar.selectbox("Choose Analysis", [
-            "📈 ML Stock Analysis", 
-            "🔍 Anomaly Detection", 
-            "📊 Risk Assessment",
-            "📊 Market Overview",
-            "💼 Portfolio Manager (Sign In Required)",
-            "👀 Watchlist Manager (Sign In Required)",
-            "⚙️ Settings (Sign In Required)"
-        ])
+    page = st.sidebar.selectbox("Choose Analysis", [
+        "📈 ML Stock Analysis", 
+        "🔍 Anomaly Detection", 
+        "📊 Risk Assessment",
+        "📊 Market Overview"
+    ])
     
     # Route to appropriate page
     if page == "📈 ML Stock Analysis":
@@ -530,32 +418,16 @@ def main():
         risk_assessment_page()
     elif page == "📊 Market Overview":
         market_overview_page()
-    elif page == "💼 Portfolio Manager" or page == "💼 Portfolio Manager (Sign In Required)":
-        portfolio_persistence.show_portfolio_manager()
-    elif page == "👀 Watchlist Manager" or page == "👀 Watchlist Manager (Sign In Required)":
-        portfolio_persistence.show_watchlist_manager()
-    elif page == "⚙️ Settings" or page == "⚙️ Settings (Sign In Required)":
-        if auth.is_authenticated():
-            auth.show_settings_page()
-        else:
-            auth.show_auth_prompt("Settings")
 
 def ml_stock_analysis_page():
     """ML-powered stock analysis"""
     st.header("📈 ML Stock Analysis")
     
-    # Get user preferences
-    preferences = auth.get_user_preferences()
-    default_symbols = preferences.get('default_symbols', ['AAPL', 'MSFT', 'GOOGL'])
-    default_timeframe = preferences.get('default_timeframe', '1mo')
-    
     col1, col2 = st.columns([2, 1])
     with col1:
-        symbol = st.text_input("Enter Stock Symbol", value=default_symbols[0] if default_symbols else "AAPL", 
-                              placeholder="e.g., AAPL, MSFT, GOOGL")
+        symbol = st.text_input("Enter Stock Symbol", value="AAPL", placeholder="e.g., AAPL, MSFT, GOOGL")
     with col2:
-        timeframe = st.selectbox("Timeframe", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], 
-                                index=["1mo", "3mo", "6mo", "1y", "2y", "5y"].index(default_timeframe))
+        timeframe = st.selectbox("Timeframe", ["1mo", "3mo", "6mo", "1y", "2y", "5y"])
     
     if st.button("Analyze with ML", type="primary"):
         if symbol:
