@@ -10,25 +10,22 @@ import json
 import io
 warnings.filterwarnings('ignore')
 
-# ML imports with graceful fallbacks
+# ML imports with graceful fallbacks - moved after st.set_page_config
 try:
     from sklearn.linear_model import LinearRegression
     from sklearn.preprocessing import StandardScaler
     from sklearn.metrics import mean_squared_error, r2_score
-    from sklearn.ensemble import RandomForestRegressor
     SKLEARN_AVAILABLE = True
 except ImportError:
     SKLEARN_AVAILABLE = False
-    st.warning("⚠️ scikit-learn not available. ML features will be limited.")
 
 try:
     from scipy import stats
     SCIPY_AVAILABLE = True
 except ImportError:
     SCIPY_AVAILABLE = False
-    st.warning("⚠️ scipy not available. Some advanced features will be limited.")
 
-# Page config
+# Page config - moved to top to avoid issues
 st.set_page_config(
     page_title="Financial Analyzer Pro - Phase 2",
     page_icon="🤖",
@@ -115,7 +112,7 @@ def get_market_data(symbol: str, period: str = "1mo"):
 def calculate_technical_indicators(data):
     """Calculate comprehensive technical indicators"""
     if data.empty:
-        return {}
+        return data
     
     try:
         # Moving Averages
@@ -199,7 +196,7 @@ def predict_price_ml(data, symbol, periods=5):
             return None, "No valid features for prediction"
         
         # Prepare features and target
-        X = df_ml[feature_cols]  # Use validated feature columns
+        X = df_ml[feature_cols]
         y = df_ml['Target']
         
         # Split data
@@ -378,91 +375,6 @@ def get_risk_recommendation(score, level):
     else:
         return "🔴 High risk - consider carefully"
 
-def create_prediction_chart(data, predictions, symbol):
-    """Create chart showing historical data and predictions"""
-    fig = go.Figure()
-    
-    # Historical data
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['Close'],
-        mode='lines',
-        name='Historical Price',
-        line=dict(color='#667eea', width=2)
-    ))
-    
-    # Predictions
-    if predictions:
-        pred_dates = predictions['dates']
-        pred_prices = predictions['predictions']
-        
-        fig.add_trace(go.Scatter(
-            x=pred_dates,
-            y=pred_prices,
-            mode='lines+markers',
-            name='ML Predictions',
-            line=dict(color='#f5576c', width=2, dash='dash'),
-            marker=dict(size=8)
-        ))
-        
-        # Confidence interval (simplified)
-        confidence = 0.1  # 10% confidence interval
-        upper_bound = [p * (1 + confidence) for p in pred_prices]
-        lower_bound = [p * (1 - confidence) for p in pred_prices]
-        
-        fig.add_trace(go.Scatter(
-            x=pred_dates + pred_dates[::-1],
-            y=upper_bound + lower_bound[::-1],
-            fill='toself',
-            fillcolor='rgba(245, 87, 108, 0.2)',
-            line=dict(color='rgba(255,255,255,0)'),
-            name='Confidence Interval',
-            showlegend=False
-        ))
-    
-    fig.update_layout(
-        title=f"{symbol} Price Prediction with ML",
-        xaxis_title="Date",
-        yaxis_title="Price ($)",
-        height=500,
-        showlegend=True
-    )
-    
-    return fig
-
-def create_anomaly_chart(data, anomalies, symbol):
-    """Create chart showing anomalies"""
-    fig = go.Figure()
-    
-    # Price line
-    fig.add_trace(go.Scatter(
-        x=data.index,
-        y=data['Close'],
-        mode='lines',
-        name='Price',
-        line=dict(color='#667eea', width=2)
-    ))
-    
-    # Anomaly points
-    if anomalies and anomalies['price_anomalies']['count'] > 0:
-        fig.add_trace(go.Scatter(
-            x=anomalies['price_anomalies']['dates'],
-            y=anomalies['price_anomalies']['prices'],
-            mode='markers',
-            name='Price Anomalies',
-            marker=dict(color='red', size=10, symbol='x')
-        ))
-    
-    fig.update_layout(
-        title=f"{symbol} Anomaly Detection",
-        xaxis_title="Date",
-        yaxis_title="Price ($)",
-        height=400,
-        showlegend=True
-    )
-    
-    return fig
-
 def get_market_overview():
     """Get comprehensive market overview data"""
     symbols = {
@@ -607,10 +519,6 @@ def ml_stock_analysis_page():
                                                   for p in predictions['predictions']]
                         })
                         st.dataframe(pred_df, use_container_width=True)
-                        
-                        # Prediction chart
-                        pred_chart = create_prediction_chart(data, predictions, symbol)
-                        st.plotly_chart(pred_chart, use_container_width=True)
                     else:
                         st.error(f"Prediction failed: {error}")
                     
@@ -626,16 +534,6 @@ def ml_stock_analysis_page():
                             st.metric("Risk Level", risk_data['risk_level'])
                         with col3:
                             st.metric("Recommendation", risk_data['recommendation'])
-                        
-                        # Risk factors breakdown
-                        st.subheader("🔍 Risk Factors Breakdown")
-                        risk_df = pd.DataFrame(list(risk_data['factors'].items()), 
-                                             columns=['Factor', 'Score'])
-                        risk_df['Percentage'] = (risk_df['Score'] / risk_data['total_score'] * 100).round(1)
-                        
-                        fig = px.pie(risk_df, values='Score', names='Factor', 
-                                   title="Risk Score Breakdown")
-                        st.plotly_chart(fig, use_container_width=True)
                     else:
                         st.error(f"Risk assessment failed: {risk_error}")
 
@@ -670,20 +568,6 @@ def anomaly_detection_page():
                             st.metric("Volume Anomalies", anomalies['volume_anomalies']['count'])
                         with col3:
                             st.metric("Total Anomalies", anomalies['total_anomalies'])
-                        
-                        # Anomaly chart
-                        anomaly_chart = create_anomaly_chart(data, anomalies, symbol)
-                        st.plotly_chart(anomaly_chart, use_container_width=True)
-                        
-                        # Anomaly details
-                        if anomalies['price_anomalies']['count'] > 0:
-                            st.subheader("📊 Price Anomaly Details")
-                            anomaly_df = pd.DataFrame({
-                                'Date': anomalies['price_anomalies']['dates'],
-                                'Price': [f"${p:.2f}" for p in anomalies['price_anomalies']['prices']],
-                                'Change': [f"{c:.2%}" for c in anomalies['price_anomalies']['changes']]
-                            })
-                            st.dataframe(anomaly_df, use_container_width=True)
                     else:
                         st.error(f"Anomaly detection failed: {error}")
 
@@ -720,33 +604,6 @@ def risk_assessment_page():
                             st.metric("Risk Level", f"{risk_color} {risk_data['risk_level']}")
                         with col3:
                             st.metric("Recommendation", risk_data['recommendation'])
-                        
-                        # Risk factors
-                        st.subheader("🔍 Risk Factors Analysis")
-                        risk_factors = risk_data['factors']
-                        
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.markdown("**Individual Risk Factors:**")
-                            for factor, score in risk_factors.items():
-                                st.write(f"• {factor.title()}: {score:.1f}/100")
-                        
-                        with col2:
-                            # Risk factors chart
-                            fig = px.bar(x=list(risk_factors.keys()), 
-                                       y=list(risk_factors.values()),
-                                       title="Risk Factors Breakdown",
-                                       labels={'x': 'Risk Factor', 'y': 'Score'})
-                            st.plotly_chart(fig, use_container_width=True)
-                        
-                        # Risk interpretation
-                        st.subheader("📋 Risk Interpretation")
-                        if risk_data['total_score'] < 30:
-                            st.success("🟢 **Low Risk Investment** - This stock shows low volatility and stable patterns. Suitable for conservative investors.")
-                        elif risk_data['total_score'] < 60:
-                            st.warning("🟡 **Medium Risk Investment** - Moderate volatility with some risk factors. Suitable for balanced portfolios.")
-                        else:
-                            st.error("🔴 **High Risk Investment** - High volatility and multiple risk factors. Only suitable for aggressive investors.")
 
 def ai_portfolio_page():
     """AI-powered portfolio analytics"""
@@ -802,36 +659,6 @@ def ai_portfolio_page():
     if risk_analysis:
         risk_df = pd.DataFrame(risk_analysis)
         st.dataframe(risk_df, use_container_width=True)
-        
-        # Portfolio risk distribution
-        st.subheader("📊 Portfolio Risk Distribution")
-        risk_counts = risk_df['Risk Level'].value_counts()
-        
-        fig = px.pie(values=risk_counts.values, names=risk_counts.index, 
-                    title="Portfolio Risk Level Distribution")
-        st.plotly_chart(fig, use_container_width=True)
-        
-        # AI Recommendations
-        st.subheader("🤖 AI Portfolio Recommendations")
-        
-        high_risk_positions = risk_df[risk_df['Risk Level'] == 'High']
-        if len(high_risk_positions) > 0:
-            st.warning(f"⚠️ **High Risk Positions Detected:** {', '.join(high_risk_positions['Symbol'])}")
-            st.write("Consider reducing exposure to these high-risk positions.")
-        
-        low_risk_positions = risk_df[risk_df['Risk Level'] == 'Low']
-        if len(low_risk_positions) > 0:
-            st.success(f"✅ **Low Risk Positions:** {', '.join(low_risk_positions['Symbol'])}")
-            st.write("These positions show stable risk profiles.")
-        
-        # Overall portfolio recommendation
-        avg_risk = risk_df['Risk Score'].mean()
-        if avg_risk < 30:
-            st.success("🟢 **Overall Portfolio Risk: LOW** - Your portfolio is well-balanced with low risk.")
-        elif avg_risk < 60:
-            st.warning("🟡 **Overall Portfolio Risk: MEDIUM** - Consider rebalancing some positions.")
-        else:
-            st.error("🔴 **Overall Portfolio Risk: HIGH** - Immediate rebalancing recommended.")
 
 def market_overview_page():
     """Enhanced market overview"""
@@ -887,28 +714,6 @@ def market_overview_page():
         with col3:
             sentiment = "🟢 Bullish" if sentiment_score > 60 else "🔴 Bearish" if sentiment_score < 40 else "🟡 Neutral"
             st.metric("Market Sentiment", sentiment)
-        
-        # VIX analysis with AI insights
-        if 'VIX' in overview:
-            vix_value = overview['VIX']['price']
-            if vix_value < 20:
-                vix_signal = "🟢 Low Volatility - Market Calm"
-                ai_insight = "AI suggests: Good time for growth investments"
-            elif vix_value > 30:
-                vix_signal = "🔴 High Volatility - Market Stress"
-                ai_insight = "AI suggests: Consider defensive positions"
-            else:
-                vix_signal = "🟡 Moderate Volatility"
-                ai_insight = "AI suggests: Balanced approach recommended"
-            
-            st.markdown(f"""
-            <div class="ml-card">
-                <h4>🤖 AI VIX Analysis</h4>
-                <p><strong>Current VIX:</strong> {vix_value:.2f}</p>
-                <p><strong>Signal:</strong> {vix_signal}</p>
-                <p><strong>AI Insight:</strong> {ai_insight}</p>
-            </div>
-            """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
