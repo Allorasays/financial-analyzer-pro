@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: financial-analyzer-phase3
+    name: financial-analyzer-pro-phase3
     env: python
     plan: free
-    buildCommand: pip install streamlit pandas yfinance plotly numpy scipy --no-cache-dir
-    startCommand: python -m streamlit run app_phase3_analytics.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    buildCommand: pip install -r requirements_phase3.txt --no-cache-dir
+    startCommand: python -m streamlit run app_phase3_database.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -14,3 +14,9 @@ services:
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
+      - key: DATABASE_URL
+        value: sqlite:///financial_analyzer.db

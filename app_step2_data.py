@@ -86,3 +86,5 @@ st.success("✅ Step 2 Complete: Real market data working!")
 st.info("Next: Add interactive charts with Plotly")
 
 
+
+

@@ -4,3 +4,5 @@ plotly==5.17.0
 yfinance==0.2.18
 numpy==1.24.3
 
+
+
