@@ -22,6 +22,8 @@ class AuthSystem:
             st.session_state.session_token = None
         if 'is_authenticated' not in st.session_state:
             st.session_state.is_authenticated = False
+        if 'is_guest' not in st.session_state:
+            st.session_state.is_guest = True  # Default to guest mode
         if 'login_attempts' not in st.session_state:
             st.session_state.login_attempts = 0
         if 'last_attempt' not in st.session_state:
@@ -39,8 +41,8 @@ class AuthSystem:
             'errors': [],
             'strength': 'weak'
         }
-        
-        if len(password) < 8:
+            
+            if len(password) < 8:
             result['is_valid'] = False
             result['errors'].append("Password must be at least 8 characters long")
         
@@ -90,27 +92,35 @@ class AuthSystem:
     
     def show_login_page(self):
         """Display login page"""
-        st.markdown("""
+    st.markdown("""
         <div style="max-width: 400px; margin: 0 auto; padding: 2rem; background: white; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
             <h2 style="text-align: center; color: #333; margin-bottom: 2rem;">🔐 Sign In</h2>
-        </div>
-        """, unsafe_allow_html=True)
+    </div>
+    """, unsafe_allow_html=True)
         
         with st.form("login_form"):
             username_email = st.text_input("Username or Email", placeholder="Enter your username or email")
             password = st.text_input("Password", type="password", placeholder="Enter your password")
             
-            col1, col2 = st.columns([1, 1])
-            with col1:
-                login_clicked = st.form_submit_button("Sign In", type="primary", use_container_width=True)
-            with col2:
-                register_clicked = st.form_submit_button("Create Account", use_container_width=True)
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            login_clicked = st.form_submit_button("Sign In", type="primary", use_container_width=True)
+        with col2:
+            register_clicked = st.form_submit_button("Create Account", use_container_width=True)
+        with col3:
+            guest_clicked = st.form_submit_button("Continue as Guest", use_container_width=True)
         
         if login_clicked:
             self.handle_login(username_email, password)
         
         if register_clicked:
             st.session_state.show_register = True
+            st.rerun()
+        
+        if guest_clicked:
+            self.enable_guest_mode()
+            st.session_state.show_login = False
+            st.session_state.show_register = False
             st.rerun()
     
     def show_register_page(self):
@@ -139,8 +149,8 @@ class AuthSystem:
         
         if back_clicked:
             st.session_state.show_register = False
-            st.rerun()
-    
+                st.rerun()
+
     def handle_login(self, username_email: str, password: str):
         """Handle user login"""
         # Rate limiting
@@ -181,13 +191,13 @@ class AuthSystem:
     
     def handle_registration(self, username: str, email: str, full_name: str, password: str, confirm_password: str):
         """Handle user registration"""
-        # Validate inputs
+            # Validate inputs
         if not all([username, email, full_name, password, confirm_password]):
             st.error("Please fill in all fields")
             return
-        
+            
         # Validate email
-        if not self.validate_email(email):
+            if not self.validate_email(email):
             st.error("Please enter a valid email address")
             return
         
@@ -326,3 +336,65 @@ class AuthSystem:
             'notification_settings': {},
             'dashboard_layout': {}
         }
+    
+    def enable_guest_mode(self):
+        """Enable guest mode for research without login"""
+        st.session_state.is_guest = True
+        st.session_state.is_authenticated = False
+        st.session_state.user = None
+        st.session_state.session_token = None
+    
+    def is_guest_mode(self) -> bool:
+        """Check if user is in guest mode"""
+        return st.session_state.is_guest and not st.session_state.is_authenticated
+    
+    def require_auth_for_feature(self, feature_name: str) -> bool:
+        """Check if user needs to be authenticated for a specific feature"""
+        auth_required_features = [
+            'portfolio_manager', 'watchlist_manager', 'save_portfolio', 
+            'save_watchlist', 'user_preferences', 'export_data'
+        ]
+        return feature_name in auth_required_features
+    
+    def show_auth_prompt(self, feature_name: str):
+        """Show authentication prompt for features that require login"""
+        st.warning(f"🔐 **{feature_name}** requires an account. Please sign in to access this feature.")
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col1:
+            if st.button("Sign In", key=f"signin_{feature_name}"):
+                st.session_state.show_login = True
+                st.rerun()
+        with col2:
+            if st.button("Create Account", key=f"register_{feature_name}"):
+                st.session_state.show_register = True
+                st.rerun()
+        with col3:
+            if st.button("Continue as Guest", key=f"guest_{feature_name}"):
+                st.session_state.show_login = False
+                st.session_state.show_register = False
+                st.rerun()
+
+    def show_optional_auth_header(self):
+        """Show optional authentication header in sidebar"""
+        if self.is_guest_mode():
+            st.sidebar.markdown("---")
+            st.sidebar.markdown("""
+            <div style="background: #e3f2fd; padding: 1rem; border-radius: 10px; margin-bottom: 1rem;">
+                <h4>👤 Guest Mode</h4>
+                <p>You're browsing as a guest. Sign in to save portfolios and access personalized features.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            col1, col2 = st.sidebar.columns(2)
+            with col1:
+                if st.button("Sign In", key="header_signin"):
+                    st.session_state.show_login = True
+                    st.rerun()
+            with col2:
+                if st.button("Register", key="header_register"):
+                    st.session_state.show_register = True
+                    st.rerun()
+        else:
+            # Show user menu for authenticated users
+            self.show_user_menu()

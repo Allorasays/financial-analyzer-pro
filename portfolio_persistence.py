@@ -93,7 +93,7 @@ class PortfolioPersistence:
         st.header("💼 Portfolio Manager")
         
         if not self.auth.is_authenticated():
-            st.warning("Please sign in to manage your portfolios")
+            self.auth.show_auth_prompt("Portfolio Manager")
             return
         
         # Portfolio management tabs
@@ -274,7 +274,7 @@ class PortfolioPersistence:
         st.header("👀 Watchlist Manager")
         
         if not self.auth.is_authenticated():
-            st.warning("Please sign in to manage your watchlists")
+            self.auth.show_auth_prompt("Watchlist Manager")
             return
         
         # Watchlist management tabs

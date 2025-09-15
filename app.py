@@ -32,8 +32,8 @@ from portfolio_persistence import PortfolioPersistence
 
 # Page config - moved to top to avoid issues
 st.set_page_config(
-    page_title="Financial Analyzer Pro - Phase 3",
-    page_icon="🗄️",
+    page_title="Financial Analyzer Pro - Research & Analysis",
+    page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -393,36 +393,52 @@ def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🗄️ Financial Analyzer Pro</h1>
-        <p>Phase 3 Enhanced - Database & User Management</p>
+        <h1>📊 Financial Analyzer Pro</h1>
+        <p>Advanced Financial Research & Analysis Platform</p>
     </div>
     """, unsafe_allow_html=True)
     
     # Phase indicator
-    st.markdown("""
-    <div class="phase-indicator">
-        <h3>🚀 Phase 3 Features Active</h3>
-        <p>✅ User Authentication | ✅ Portfolio Persistence | ✅ User Preferences | ✅ Database Integration | ✅ Personalized Experience</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if auth.is_authenticated():
+        st.markdown("""
+        <div class="phase-indicator">
+            <h3>🚀 Phase 3 Features Active</h3>
+            <p>✅ User Authentication | ✅ Portfolio Persistence | ✅ User Preferences | ✅ Database Integration | ✅ Personalized Experience</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="phase-indicator">
+            <h3>🔍 Research Mode</h3>
+            <p>✅ ML Stock Analysis | ✅ Anomaly Detection | ✅ Risk Assessment | ✅ Market Overview | 🔐 Sign in for Portfolio Management</p>
+        </div>
+        """, unsafe_allow_html=True)
     
-    # Check authentication
-    if not auth.is_authenticated():
-        # Show login/register page
-        if hasattr(st.session_state, 'show_register') and st.session_state.show_register:
-            auth.show_register_page()
-        else:
-            auth.show_login_page()
+    # Handle optional authentication
+    if hasattr(st.session_state, 'show_login') and st.session_state.show_login:
+        auth.show_login_page()
+        return
+    
+    if hasattr(st.session_state, 'show_register') and st.session_state.show_register:
+        auth.show_register_page()
         return
     
     # User welcome
-    user = auth.get_current_user()
-    st.markdown(f"""
-    <div class="user-welcome">
-        <h4>👤 Welcome back, {user['full_name'] or user['username']}!</h4>
-        <p>Your personalized financial analysis platform is ready.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    if auth.is_authenticated():
+        user = auth.get_current_user()
+        st.markdown(f"""
+        <div class="user-welcome">
+            <h4>👤 Welcome back, {user['full_name'] or user['username']}!</h4>
+            <p>Your personalized financial analysis platform is ready.</p>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div class="user-welcome">
+            <h4>🔍 Financial Research Platform</h4>
+            <p>Analyze stocks, detect anomalies, and assess risk. Sign in to save portfolios and access personalized features.</p>
+        </div>
+        """, unsafe_allow_html=True)
     
     # Database status
     db_stats = db.get_database_stats()
@@ -446,20 +462,33 @@ def main():
     </div>
     """, unsafe_allow_html=True)
     
-    # User menu
-    auth.show_user_menu()
+    # Optional authentication header
+    auth.show_optional_auth_header()
     
     # Main navigation
     st.sidebar.title("📊 Analysis Tools")
-    page = st.sidebar.selectbox("Choose Analysis", [
-        "📈 ML Stock Analysis", 
-        "🔍 Anomaly Detection", 
-        "📊 Risk Assessment",
-        "💼 Portfolio Manager",
-        "👀 Watchlist Manager",
-        "📊 Market Overview",
-        "⚙️ Settings"
-    ])
+    
+    # Different navigation options based on authentication status
+    if auth.is_authenticated():
+        page = st.sidebar.selectbox("Choose Analysis", [
+            "📈 ML Stock Analysis", 
+            "🔍 Anomaly Detection", 
+            "📊 Risk Assessment",
+            "💼 Portfolio Manager",
+            "👀 Watchlist Manager",
+            "📊 Market Overview",
+            "⚙️ Settings"
+        ])
+    else:
+        page = st.sidebar.selectbox("Choose Analysis", [
+            "📈 ML Stock Analysis", 
+            "🔍 Anomaly Detection", 
+            "📊 Risk Assessment",
+            "📊 Market Overview",
+            "💼 Portfolio Manager (Sign In Required)",
+            "👀 Watchlist Manager (Sign In Required)",
+            "⚙️ Settings (Sign In Required)"
+        ])
     
     # Route to appropriate page
     if page == "📈 ML Stock Analysis":
@@ -468,14 +497,17 @@ def main():
         anomaly_detection_page()
     elif page == "📊 Risk Assessment":
         risk_assessment_page()
-    elif page == "💼 Portfolio Manager":
-        portfolio_persistence.show_portfolio_manager()
-    elif page == "👀 Watchlist Manager":
-        portfolio_persistence.show_watchlist_manager()
     elif page == "📊 Market Overview":
         market_overview_page()
-    elif page == "⚙️ Settings":
-        auth.show_settings_page()
+    elif page == "💼 Portfolio Manager" or page == "💼 Portfolio Manager (Sign In Required)":
+        portfolio_persistence.show_portfolio_manager()
+    elif page == "👀 Watchlist Manager" or page == "👀 Watchlist Manager (Sign In Required)":
+        portfolio_persistence.show_watchlist_manager()
+    elif page == "⚙️ Settings" or page == "⚙️ Settings (Sign In Required)":
+        if auth.is_authenticated():
+            auth.show_settings_page()
+        else:
+            auth.show_auth_prompt("Settings")
 
 def ml_stock_analysis_page():
     """ML-powered stock analysis"""
