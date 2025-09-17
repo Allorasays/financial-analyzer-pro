@@ -10,6 +10,17 @@ import json
 import warnings
 warnings.filterwarnings('ignore')
 
+# Real-time data imports
+from realtime_data_service import realtime_service, get_cached_market_overview, get_cached_live_price, get_cached_stock_data
+from realtime_dashboard import (
+    display_realtime_market_overview, 
+    display_live_stock_tracker, 
+    display_portfolio_realtime,
+    display_price_alerts,
+    display_data_source_status
+)
+from websocket_service import start_real_time_mode, get_real_time_data, stop_real_time_mode
+
 # Enhanced ML imports
 try:
     from sklearn.linear_model import LinearRegression, Ridge, Lasso, ElasticNet
@@ -84,6 +95,7 @@ analysis_tab = st.sidebar.selectbox(
         "📊 Stock Analysis", 
         "💼 Portfolio Management",
         "📈 Market Overview",
+        "🔴 Real-Time Data",
         "🏭 Industry Analysis",
         "⚠️ Risk Assessment",
         "🤖 Machine Learning",
@@ -102,13 +114,19 @@ if 'notifications' not in st.session_state:
     st.session_state.notifications = []
 
 def get_market_data(symbol: str, period: str = "1y"):
-    """Get market data with caching"""
+    """Get market data with real-time integration and caching"""
     try:
+        # Try real-time service first
+        data, source = get_cached_stock_data(symbol, period)
+        if not data.empty:
+            return data, source
+        
+        # Fallback to yfinance
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period)
         if data.empty:
             return None, f"No data found for {symbol}"
-        return data, None
+        return data, "yfinance_fallback"
     except Exception as e:
         return None, f"Error fetching data: {str(e)}"
 
@@ -463,6 +481,55 @@ elif analysis_tab == "💼 Portfolio Management":
         if st.button("Clear Portfolio", type="secondary"):
             st.session_state.portfolio = []
             st.rerun()
+
+elif analysis_tab == "🔴 Real-Time Data":
+    st.header("🔴 Real-Time Data & Live Updates")
+    
+    # Real-time mode toggle
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1:
+        realtime_mode = st.checkbox("🔴 Enable Real-Time Mode", value=False, help="Enable live data streaming and auto-refresh")
+    with col2:
+        if st.button("🔄 Refresh All"):
+            st.cache_data.clear()
+            st.rerun()
+    with col3:
+        if st.button("⏸️ Stop Real-Time"):
+            stop_real_time_mode()
+            st.rerun()
+    
+    if realtime_mode:
+        st.success("🔴 Real-time mode active! Data will update automatically.")
+    else:
+        st.info("📊 Cached mode active. Enable real-time mode for live updates.")
+    
+    # Tabs for different real-time features
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📈 Live Market", 
+        "📊 Stock Tracker", 
+        "💼 Live Portfolio", 
+        "🔔 Price Alerts", 
+        "🔧 Data Sources"
+    ])
+    
+    with tab1:
+        display_realtime_market_overview()
+    
+    with tab2:
+        # Initialize tracked symbols in session state
+        if 'tracked_symbols' not in st.session_state:
+            st.session_state.tracked_symbols = ['AAPL', 'MSFT', 'GOOGL']
+        
+        display_live_stock_tracker(st.session_state.tracked_symbols)
+    
+    with tab3:
+        display_portfolio_realtime(st.session_state.portfolio)
+    
+    with tab4:
+        display_price_alerts()
+    
+    with tab5:
+        display_data_source_status()
 
 elif analysis_tab == "🤖 Machine Learning":
     st.header("🤖 Machine Learning Analysis")
