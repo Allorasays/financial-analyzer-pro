@@ -10,21 +10,31 @@ import json
 import warnings
 warnings.filterwarnings('ignore')
 
-# Real-time data imports
-from realtime_data_service import realtime_service, get_cached_market_overview, get_cached_live_price, get_cached_stock_data
-from realtime_dashboard import (
-    display_realtime_market_overview, 
-    display_live_stock_tracker, 
-    display_portfolio_realtime,
-    display_price_alerts,
-    display_data_source_status
-)
-from websocket_service import start_real_time_mode, get_real_time_data, stop_real_time_mode
+# Real-time data imports with graceful fallbacks
+try:
+    from realtime_data_service import realtime_service, get_cached_market_overview, get_cached_live_price, get_cached_stock_data
+    from realtime_dashboard import (
+        display_realtime_market_overview, 
+        display_live_stock_tracker, 
+        display_portfolio_realtime,
+        display_price_alerts,
+        display_data_source_status
+    )
+    from websocket_service import start_real_time_mode, get_real_time_data, stop_real_time_mode
+    REALTIME_AVAILABLE = True
+except ImportError as e:
+    st.warning(f"Real-time features not available: {str(e)}")
+    REALTIME_AVAILABLE = False
 
-# Enhanced ML imports
-from enhanced_ml_service import enhanced_ml_service
-from enhanced_ml_dashboard import enhanced_ml_dashboard
-from sentiment_analysis_service import sentiment_service
+# Enhanced ML imports with graceful fallbacks
+try:
+    from enhanced_ml_service import enhanced_ml_service
+    from enhanced_ml_dashboard import enhanced_ml_dashboard
+    from sentiment_analysis_service import sentiment_service
+    ENHANCED_ML_AVAILABLE = True
+except ImportError as e:
+    st.warning(f"Enhanced ML features not available: {str(e)}")
+    ENHANCED_ML_AVAILABLE = False
 
 # Enhanced ML imports
 try:
@@ -121,17 +131,21 @@ if 'notifications' not in st.session_state:
 def get_market_data(symbol: str, period: str = "1y"):
     """Get market data with real-time integration and caching"""
     try:
-        # Try real-time service first
-        data, source = get_cached_stock_data(symbol, period)
-        if not data.empty:
-            return data, source
+        # Try real-time service first if available
+        if REALTIME_AVAILABLE:
+            try:
+                data, source = get_cached_stock_data(symbol, period)
+                if not data.empty:
+                    return data, source
+            except Exception as e:
+                st.warning(f"Real-time data service failed: {str(e)}")
         
         # Fallback to yfinance
         ticker = yf.Ticker(symbol)
         data = ticker.history(period=period)
         if data.empty:
             return None, f"No data found for {symbol}"
-        return data, "yfinance_fallback"
+        return data, "yfinance"
     except Exception as e:
         return None, f"Error fetching data: {str(e)}"
 
@@ -490,72 +504,147 @@ elif analysis_tab == "💼 Portfolio Management":
 elif analysis_tab == "🔴 Real-Time Data":
     st.header("🔴 Real-Time Data & Live Updates")
     
-    # Real-time mode toggle
-    col1, col2, col3 = st.columns([2, 1, 1])
-    with col1:
-        realtime_mode = st.checkbox("🔴 Enable Real-Time Mode", value=False, help="Enable live data streaming and auto-refresh")
-    with col2:
-        if st.button("🔄 Refresh All"):
-            st.cache_data.clear()
-            st.rerun()
-    with col3:
-        if st.button("⏸️ Stop Real-Time"):
-            stop_real_time_mode()
-            st.rerun()
-    
-    if realtime_mode:
-        st.success("🔴 Real-time mode active! Data will update automatically.")
-    else:
-        st.info("📊 Cached mode active. Enable real-time mode for live updates.")
-    
-    # Tabs for different real-time features
-    tab1, tab2, tab3, tab4, tab5 = st.tabs([
-        "📈 Live Market", 
-        "📊 Stock Tracker", 
-        "💼 Live Portfolio", 
-        "🔔 Price Alerts", 
-        "🔧 Data Sources"
-    ])
-    
-    with tab1:
-        display_realtime_market_overview()
-    
-    with tab2:
-        # Initialize tracked symbols in session state
-        if 'tracked_symbols' not in st.session_state:
-            st.session_state.tracked_symbols = ['AAPL', 'MSFT', 'GOOGL']
+    if not REALTIME_AVAILABLE:
+        st.error("❌ Real-time features are not available. Some dependencies may be missing.")
+        st.info("💡 The app will work with basic features. Real-time features require additional setup.")
         
-        display_live_stock_tracker(st.session_state.tracked_symbols)
-    
-    with tab3:
-        display_portfolio_realtime(st.session_state.portfolio)
-    
-    with tab4:
-        display_price_alerts()
-    
-    with tab5:
-        display_data_source_status()
+        # Fallback to basic market overview
+        st.subheader("📈 Basic Market Overview")
+        market_data = get_market_overview()
+        
+        if market_data:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            indices = [
+                ('^GSPC', 'S&P 500', col1),
+                ('^IXIC', 'NASDAQ', col2),
+                ('^DJI', 'DOW', col3),
+                ('^VIX', 'VIX', col4)
+            ]
+            
+            for symbol, name, col in indices:
+                with col:
+                    if symbol in market_data:
+                        data = market_data[symbol]
+                        change_color = "🟢" if data['change'] >= 0 else "🔴"
+                        st.metric(
+                            name,
+                            f"${data['price']:.2f}",
+                            f"{change_color} {data['change_percent']:+.2f}%"
+                        )
+        else:
+            st.warning("Could not fetch market data")
+    else:
+        # Real-time mode toggle
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            realtime_mode = st.checkbox("🔴 Enable Real-Time Mode", value=False, help="Enable live data streaming and auto-refresh")
+        with col2:
+            if st.button("🔄 Refresh All"):
+                st.cache_data.clear()
+                st.rerun()
+        with col3:
+            if st.button("⏸️ Stop Real-Time"):
+                stop_real_time_mode()
+                st.rerun()
+        
+        if realtime_mode:
+            st.success("🔴 Real-time mode active! Data will update automatically.")
+        else:
+            st.info("📊 Cached mode active. Enable real-time mode for live updates.")
+        
+        # Tabs for different real-time features
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Live Market", 
+            "📊 Stock Tracker", 
+            "💼 Live Portfolio", 
+            "🔔 Price Alerts", 
+            "🔧 Data Sources"
+        ])
+        
+        with tab1:
+            display_realtime_market_overview()
+        
+        with tab2:
+            # Initialize tracked symbols in session state
+            if 'tracked_symbols' not in st.session_state:
+                st.session_state.tracked_symbols = ['AAPL', 'MSFT', 'GOOGL']
+            
+            display_live_stock_tracker(st.session_state.tracked_symbols)
+        
+        with tab3:
+            display_portfolio_realtime(st.session_state.portfolio)
+        
+        with tab4:
+            display_price_alerts()
+        
+        with tab5:
+            display_data_source_status()
 
 elif analysis_tab == "🤖 Enhanced ML":
     st.header("🤖 Enhanced Machine Learning Analysis")
     
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        symbol = st.text_input("Stock Symbol", value="AAPL")
-    with col2:
-        period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
-    
-    if st.button("🚀 Run Enhanced ML Analysis", type="primary"):
-        with st.spinner("Running enhanced machine learning analysis..."):
-            data, error = get_market_data(symbol, period)
-            
-            if error:
-                st.error(f"❌ {error}")
-            else:
-                st.success(f"✅ Enhanced ML analysis complete for {symbol}")
+    if not ENHANCED_ML_AVAILABLE:
+        st.error("❌ Enhanced ML features are not available. Some dependencies may be missing.")
+        st.info("💡 The app will work with basic ML features. Enhanced ML requires additional setup.")
+        
+        # Fallback to basic ML analysis
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            symbol = st.text_input("Stock Symbol", value="AAPL")
+        with col2:
+            period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
+        
+        if st.button("🚀 Run Basic ML Analysis", type="primary"):
+            with st.spinner("Running basic machine learning analysis..."):
+                data, error = get_market_data(symbol, period)
                 
-                # Display enhanced ML dashboard
-                enhanced_ml_dashboard.display_ml_analysis_dashboard(symbol, data, period)
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    st.success(f"✅ Basic ML analysis complete for {symbol}")
+                    
+                    # Use the original ML analysis from the main app
+                    st.subheader("📊 Basic ML Analysis")
+                    st.info("This is a simplified ML analysis. For advanced features, ensure all dependencies are installed.")
+                    
+                    # Basic technical indicators
+                    data_with_indicators = calculate_technical_indicators(data)
+                    
+                    # Display basic metrics
+                    current_price = data['Close'].iloc[-1]
+                    previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
+                    change = current_price - previous_price
+                    change_percent = (change / previous_price) * 100
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
+                        st.metric("Current Price", f"${current_price:.2f}")
+                    with col2:
+                        st.metric("Change", f"{change:+.2f}")
+                    with col3:
+                        st.metric("Change %", f"{change_percent:+.2f}%")
+                    with col4:
+                        st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
+    else:
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            symbol = st.text_input("Stock Symbol", value="AAPL")
+        with col2:
+            period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
+        
+        if st.button("🚀 Run Enhanced ML Analysis", type="primary"):
+            with st.spinner("Running enhanced machine learning analysis..."):
+                data, error = get_market_data(symbol, period)
+                
+                if error:
+                    st.error(f"❌ {error}")
+                else:
+                    st.success(f"✅ Enhanced ML analysis complete for {symbol}")
+                    
+                    # Display enhanced ML dashboard
+                    enhanced_ml_dashboard.display_ml_analysis_dashboard(symbol, data, period)
 
 elif analysis_tab == "📤 Export & Reports":
     st.header("📤 Export & Reports")
