@@ -4,7 +4,7 @@ services:
     env: python
     plan: free
     buildCommand: pip install -r requirements_minimal.txt --no-cache-dir
-    startCommand: streamlit run app_minimal_test.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    startCommand: streamlit run app_enhanced_stable.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0

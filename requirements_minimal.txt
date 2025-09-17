@@ -1,6 +1,8 @@
-# Minimal requirements for test deployment
+# Enhanced requirements for stable deployment
 streamlit>=1.28.0
 pandas>=2.0.0
 plotly>=5.15.0
 yfinance>=0.2.18
 numpy>=1.24.0
+scikit-learn>=1.3.0
+scipy>=1.11.0
