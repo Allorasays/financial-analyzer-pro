@@ -485,11 +485,46 @@ elif analysis_tab == "🤖 Machine Learning":
                 # Prepare features
                 data_with_indicators = calculate_technical_indicators(data)
                 
-                # Create features for ML
-                features = ['SMA_20', 'SMA_50', 'RSI', 'MACD', 'MACD_Signal', 'BB_Upper', 'BB_Lower']
-                available_features = [f for f in features if f in data_with_indicators.columns]
+                # Create features for ML - more robust feature selection
+                # Start with basic features that require less data
+                basic_features = ['Close', 'Volume']
                 
-                if len(available_features) >= 3:
+                # Add technical indicators if they exist and have data
+                technical_features = []
+                if 'RSI' in data_with_indicators.columns and not data_with_indicators['RSI'].isna().all():
+                    technical_features.append('RSI')
+                if 'SMA_20' in data_with_indicators.columns and not data_with_indicators['SMA_20'].isna().all():
+                    technical_features.append('SMA_20')
+                if 'SMA_50' in data_with_indicators.columns and not data_with_indicators['SMA_50'].isna().all():
+                    technical_features.append('SMA_50')
+                if 'MACD' in data_with_indicators.columns and not data_with_indicators['MACD'].isna().all():
+                    technical_features.append('MACD')
+                if 'MACD_Signal' in data_with_indicators.columns and not data_with_indicators['MACD_Signal'].isna().all():
+                    technical_features.append('MACD_Signal')
+                
+                # Add price-based features
+                price_features = []
+                data_with_indicators['Price_Change'] = data_with_indicators['Close'].pct_change()
+                data_with_indicators['Price_Range'] = (data_with_indicators['High'] - data_with_indicators['Low']) / data_with_indicators['Close']
+                data_with_indicators['Volume_Change'] = data_with_indicators['Volume'].pct_change()
+                
+                price_features.extend(['Price_Change', 'Price_Range', 'Volume_Change'])
+                
+                # Combine all available features
+                all_features = basic_features + technical_features + price_features
+                
+                # Filter features that exist in the data and have sufficient non-NaN values
+                available_features = []
+                for feature in all_features:
+                    if feature in data_with_indicators.columns:
+                        non_nan_count = data_with_indicators[feature].notna().sum()
+                        if non_nan_count >= 10:  # Require at least 10 non-NaN values
+                            available_features.append(feature)
+                
+                st.info(f"📊 Available features: {len(available_features)} ({', '.join(available_features[:5])}{'...' if len(available_features) > 5 else ''})")
+                
+                if len(available_features) >= 2:  # Reduced requirement from 3 to 2
+                    # Extract features and target
                     X = data_with_indicators[available_features].dropna()
                     y = data['Close'].shift(-1).dropna()
                     
@@ -498,7 +533,9 @@ elif analysis_tab == "🤖 Machine Learning":
                     X = X.iloc[:min_len]
                     y = y.iloc[:min_len]
                     
-                    if len(X) > 50:
+                    st.info(f"📈 Data points available: {len(X)} (need ≥10)")
+                    
+                    if len(X) >= 10:  # Reduced requirement from 50 to 10
                         # Train models
                         ml_results, ml_error = train_ml_models(X, y)
                         
@@ -506,14 +543,15 @@ elif analysis_tab == "🤖 Machine Learning":
                             st.error(f"❌ {ml_error}")
                         else:
                             # Display model performance
-                            st.subheader("Model Performance")
+                            st.subheader("📊 Model Performance")
                             
                             performance_data = []
                             for model_name, scores in ml_results['scores'].items():
                                 performance_data.append({
                                     'Model': model_name,
                                     'R² Score': f"{scores['r2']:.4f}",
-                                    'MSE': f"{scores['mse']:.2f}"
+                                    'MSE': f"{scores['mse']:.2f}",
+                                    'RMSE': f"{np.sqrt(scores['mse']):.2f}"
                                 })
                             
                             performance_df = pd.DataFrame(performance_data)
@@ -524,27 +562,65 @@ elif analysis_tab == "🤖 Machine Learning":
                             st.success(f"🏆 Best Model: {best_model[0]} (R² = {best_model[1]['r2']:.4f})")
                             
                             # Make prediction
-                            latest_features = X.iloc[-1:].values
-                            latest_features_scaled = ml_results['scaler'].transform(latest_features)
-                            
-                            best_model_obj = ml_results['models'][best_model[0]]
-                            prediction = best_model_obj.predict(latest_features_scaled)[0]
-                            
-                            current_price = data['Close'].iloc[-1]
-                            price_change = (prediction - current_price) / current_price * 100
-                            
-                            col1, col2, col3 = st.columns(3)
-                            
-                            with col1:
-                                st.metric("Current Price", f"${current_price:.2f}")
-                            with col2:
-                                st.metric("Predicted Price", f"${prediction:.2f}")
-                            with col3:
-                                st.metric("Expected Change", f"{price_change:+.2f}%")
+                            try:
+                                latest_features = X.iloc[-1:].values
+                                latest_features_scaled = ml_results['scaler'].transform(latest_features)
+                                
+                                best_model_obj = ml_results['models'][best_model[0]]
+                                prediction = best_model_obj.predict(latest_features_scaled)[0]
+                                
+                                current_price = data['Close'].iloc[-1]
+                                price_change = (prediction - current_price) / current_price * 100
+                                
+                                # Calculate confidence based on model performance
+                                confidence = min(95, max(10, best_model[1]['r2'] * 100))
+                                
+                                col1, col2, col3, col4 = st.columns(4)
+                                
+                                with col1:
+                                    st.metric("Current Price", f"${current_price:.2f}")
+                                with col2:
+                                    st.metric("Predicted Price", f"${prediction:.2f}")
+                                with col3:
+                                    st.metric("Expected Change", f"{price_change:+.2f}%")
+                                with col4:
+                                    st.metric("Confidence", f"{confidence:.1f}%")
+                                
+                                # Prediction interpretation
+                                if price_change > 2:
+                                    st.success(f"📈 **Bullish Prediction**: Expected to gain {price_change:.1f}%")
+                                elif price_change < -2:
+                                    st.error(f"📉 **Bearish Prediction**: Expected to decline {price_change:.1f}%")
+                                else:
+                                    st.info(f"📊 **Neutral Prediction**: Expected change of {price_change:+.1f}%")
+                                
+                                # Feature importance (for tree-based models)
+                                if hasattr(best_model_obj, 'feature_importances_'):
+                                    st.subheader("🎯 Feature Importance")
+                                    feature_importance = best_model_obj.feature_importances_
+                                    importance_df = pd.DataFrame({
+                                        'Feature': available_features,
+                                        'Importance': feature_importance
+                                    }).sort_values('Importance', ascending=False)
+                                    
+                                    fig_importance = px.bar(
+                                        importance_df.head(8),
+                                        x='Importance',
+                                        y='Feature',
+                                        orientation='h',
+                                        title="Top Features for Prediction"
+                                    )
+                                    fig_importance.update_layout(height=400)
+                                    st.plotly_chart(fig_importance, use_container_width=True)
+                                
+                            except Exception as e:
+                                st.error(f"❌ Prediction error: {str(e)}")
                     else:
-                        st.warning("⚠️ Not enough data for ML analysis")
+                        st.warning(f"⚠️ Not enough data for ML analysis. Need at least 10 data points, got {len(X)}")
+                        st.info("💡 Try using a longer time period (6mo, 1y, 2y) for better ML results")
                 else:
-                    st.warning("⚠️ Insufficient features for ML analysis")
+                    st.warning(f"⚠️ Insufficient features for ML analysis. Need at least 2 features, got {len(available_features)}")
+                    st.info("💡 Try using a longer time period to generate more technical indicators")
 
 elif analysis_tab == "📤 Export & Reports":
     st.header("📤 Export & Reports")

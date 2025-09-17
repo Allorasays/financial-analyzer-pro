@@ -178,24 +178,54 @@ def predict_price_ml(data, symbol, periods=5):
         return None, "ML library not available"
     
     try:
-        # Prepare features for ML
-        features = ['Close', 'Volume', 'RSI', 'MACD', 'BB_Position', 'Stoch_K', 'Volatility']
-        available_features = [f for f in features if f in data.columns]
+        # More robust feature selection
+        basic_features = ['Close', 'Volume']
+        
+        # Add technical indicators if they exist and have data
+        technical_features = []
+        if 'RSI' in data.columns and not data['RSI'].isna().all():
+            technical_features.append('RSI')
+        if 'SMA_20' in data.columns and not data['SMA_20'].isna().all():
+            technical_features.append('SMA_20')
+        if 'SMA_50' in data.columns and not data['SMA_50'].isna().all():
+            technical_features.append('SMA_50')
+        if 'MACD' in data.columns and not data['MACD'].isna().all():
+            technical_features.append('MACD')
+        if 'MACD_Signal' in data.columns and not data['MACD_Signal'].isna().all():
+            technical_features.append('MACD_Signal')
+        
+        # Add price-based features
+        data['Price_Change'] = data['Close'].pct_change()
+        data['Price_Range'] = (data['High'] - data['Low']) / data['Close']
+        data['Volume_Change'] = data['Volume'].pct_change()
+        
+        price_features = ['Price_Change', 'Price_Range', 'Volume_Change']
+        
+        # Combine all available features
+        all_features = basic_features + technical_features + price_features
+        
+        # Filter features that exist in the data and have sufficient non-NaN values
+        available_features = []
+        for feature in all_features:
+            if feature in data.columns:
+                non_nan_count = data[feature].notna().sum()
+                if non_nan_count >= 10:  # Require at least 10 non-NaN values
+                    available_features.append(feature)
         
         if len(available_features) < 2:
-            return None, "Insufficient features for prediction"
+            return None, f"Insufficient features for prediction (need ≥2, got {len(available_features)})"
         
         # Create lagged features
         df_ml = data[available_features].dropna()
-        if len(df_ml) < 30:
-            return None, "Insufficient data for prediction"
+        if len(df_ml) < 10:  # Reduced from 30 to 10
+            return None, f"Insufficient data for prediction (need ≥10, got {len(df_ml)})"
         
         # Create target variable (future price)
         df_ml['Target'] = df_ml['Close'].shift(-periods)
         df_ml = df_ml.dropna()
         
-        if len(df_ml) < 20:
-            return None, "Insufficient data after creating target"
+        if len(df_ml) < 5:  # Reduced from 20 to 5
+            return None, f"Insufficient data after creating target (need ≥5, got {len(df_ml)})"
         
         # Ensure we have valid features
         feature_cols = [col for col in available_features if col != 'Close' and col in df_ml.columns]
@@ -207,7 +237,7 @@ def predict_price_ml(data, symbol, periods=5):
         y = df_ml['Target']
         
         # Split data
-        split_idx = int(len(df_ml) * 0.8)
+        split_idx = max(1, int(len(df_ml) * 0.8))
         X_train, X_test = X[:split_idx], X[split_idx:]
         y_train, y_test = y[:split_idx], y[split_idx:]
         
@@ -231,7 +261,8 @@ def predict_price_ml(data, symbol, periods=5):
             pred_price = model.predict(last_features)[0]
             future_prices.append(pred_price)
             # Update features for next prediction (simplified)
-            last_features[0][0] = pred_price  # Update price feature
+            if len(last_features[0]) > 0:
+                last_features[0][0] = pred_price  # Update price feature
         
         # Create prediction dates
         last_date = data.index[-1]
@@ -243,7 +274,9 @@ def predict_price_ml(data, symbol, periods=5):
             'current_price': current_price,
             'accuracy': r2,
             'mse': mse,
-            'model_type': 'Linear Regression'
+            'model_type': 'Linear Regression',
+            'features_used': len(feature_cols),
+            'data_points': len(df_ml)
         }, None
         
     except Exception as e:
