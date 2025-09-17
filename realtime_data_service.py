@@ -8,8 +8,6 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import requests
-import asyncio
-import websockets
 import json
 import time
 from datetime import datetime, timedelta
@@ -18,6 +16,14 @@ import threading
 from dataclasses import dataclass
 from enum import Enum
 import logging
+
+# Optional imports with graceful fallbacks
+try:
+    import asyncio
+    import websockets
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,6 +57,22 @@ class RealTimeDataService:
         
     def _initialize_data_sources(self) -> Dict[DataProvider, DataSource]:
         """Initialize available data sources"""
+        # Try to get API keys from secrets, fallback to empty string
+        try:
+            alpha_vantage_key = st.secrets.get("ALPHA_VANTAGE_API_KEY", "")
+        except:
+            alpha_vantage_key = ""
+        
+        try:
+            iex_cloud_key = st.secrets.get("IEX_CLOUD_API_KEY", "")
+        except:
+            iex_cloud_key = ""
+        
+        try:
+            polygon_key = st.secrets.get("POLYGON_API_KEY", "")
+        except:
+            polygon_key = ""
+        
         return {
             DataProvider.YFINANCE: DataSource(
                 name="Yahoo Finance",
@@ -60,19 +82,19 @@ class RealTimeDataService:
             ),
             DataProvider.ALPHA_VANTAGE: DataSource(
                 name="Alpha Vantage",
-                api_key=st.secrets.get("ALPHA_VANTAGE_API_KEY", ""),
+                api_key=alpha_vantage_key,
                 base_url="https://www.alphavantage.co/query",
                 rate_limit=5  # Free tier limit
             ),
             DataProvider.IEX_CLOUD: DataSource(
                 name="IEX Cloud",
-                api_key=st.secrets.get("IEX_CLOUD_API_KEY", ""),
+                api_key=iex_cloud_key,
                 base_url="https://cloud.iexapis.com/stable",
                 rate_limit=500000  # Paid tier
             ),
             DataProvider.POLYGON: DataSource(
                 name="Polygon.io",
-                api_key=st.secrets.get("POLYGON_API_KEY", ""),
+                api_key=polygon_key,
                 base_url="https://api.polygon.io",
                 rate_limit=1000  # Free tier
             )

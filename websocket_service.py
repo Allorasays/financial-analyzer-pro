@@ -3,8 +3,6 @@ WebSocket Service for Real-Time Financial Data Streaming
 Provides live price updates and market data streaming
 """
 
-import asyncio
-import websockets
 import json
 import streamlit as st
 import pandas as pd
@@ -14,6 +12,14 @@ import threading
 import logging
 from dataclasses import dataclass
 import time
+
+# Optional imports with graceful fallbacks
+try:
+    import asyncio
+    import websockets
+    WEBSOCKETS_AVAILABLE = True
+except ImportError:
+    WEBSOCKETS_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -35,9 +41,14 @@ class WebSocketService:
         self.subscribers = {}
         self.running = False
         self.thread = None
+        self.websockets_available = WEBSOCKETS_AVAILABLE
         
     def start_websocket_server(self, host: str = "localhost", port: int = 8765):
         """Start WebSocket server in a separate thread"""
+        if not self.websockets_available:
+            logger.warning("WebSockets not available - skipping server start")
+            return
+            
         if self.running:
             return
             
