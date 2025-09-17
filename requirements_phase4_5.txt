@@ -1,0 +1,65 @@
+# Financial Analyzer Pro - Phase 4 & 5 Enhanced Requirements
+# Advanced ML, Real-time Features, and Complete Platform
+
+# Core dependencies
+streamlit>=1.28.0
+pandas>=2.0.0
+numpy>=1.24.0
+plotly>=5.15.0
+yfinance>=0.2.18
+
+# Machine Learning & Advanced Analytics
+scikit-learn>=1.3.0
+scipy>=1.11.0
+tensorflow>=2.13.0
+keras>=2.13.0
+
+# Data processing and analysis
+scipy>=1.11.0
+statsmodels>=0.14.0
+ta-lib>=0.4.25
+
+# Real-time features and async
+asyncio-mqtt>=0.16.1
+websockets>=11.0.0
+aiohttp>=3.8.0
+
+# Database and caching
+redis>=4.6.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
+
+# Export and reporting
+openpyxl>=3.1.0
+reportlab>=4.0.0
+jinja2>=3.1.0
+
+# Performance and monitoring
+psutil>=5.9.0
+memory-profiler>=0.60.0
+
+# Security and validation
+cryptography>=41.0.0
+python-jose>=3.3.0
+
+# API and web services
+fastapi>=0.100.0
+uvicorn>=0.23.0
+requests>=2.31.0
+
+# Configuration and environment
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+
+# Testing and development
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+
+# Optional: Advanced features
+# Uncomment if needed
+# torch>=2.0.0
+# xgboost>=1.7.0
+# lightgbm>=4.0.0
+# catboost>=1.2.0

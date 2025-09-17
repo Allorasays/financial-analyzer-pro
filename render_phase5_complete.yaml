@@ -1,0 +1,173 @@
+services:
+  # Main Financial Analyzer Pro Application
+  - type: web
+    name: financial-analyzer-pro
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements_phase4_5.txt
+    startCommand: streamlit run app_phase5_complete_integrated.py --server.port=$PORT --server.address=0.0.0.0
+    envVars:
+      - key: PORT
+        value: 8501
+      - key: STREAMLIT_SERVER_PORT
+        value: 8501
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: PYTHONPATH
+        value: .
+    healthCheckPath: /
+    autoDeploy: true
+
+  # Real-time Data Service
+  - type: web
+    name: realtime-data-service
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements_phase4_5.txt
+    startCommand: python realtime_features.py
+    envVars:
+      - key: PORT
+        value: 8502
+      - key: REDIS_URL
+        value: redis://localhost:6379
+    autoDeploy: true
+
+  # Advanced Analytics Service
+  - type: web
+    name: analytics-service
+    env: python
+    plan: starter
+    buildCommand: pip install -r requirements_phase4_5.txt
+    startCommand: python advanced_analytics_dashboard.py
+    envVars:
+      - key: PORT
+        value: 8503
+      - key: DATABASE_URL
+        value: postgresql://user:pass@localhost:5432/financial_analyzer
+    autoDeploy: true
+
+  # Redis Cache Service
+  - type: redis
+    name: financial-cache
+    plan: starter
+    maxmemoryPolicy: allkeys-lru
+
+  # PostgreSQL Database
+  - type: pgres
+    name: financial-db
+    plan: starter
+    databaseName: financial_analyzer
+    databaseUser: financial_user
+    databasePassword: secure_password_123
+
+# Environment Variables (Global)
+envVars:
+  - key: PYTHON_VERSION
+    value: 3.11.0
+  - key: STREAMLIT_THEME_BASE
+    value: light
+  - key: STREAMLIT_THEME_PRIMARY_COLOR
+    value: "#667eea"
+  - key: STREAMLIT_THEME_BACKGROUND_COLOR
+    value: "#ffffff"
+  - key: STREAMLIT_THEME_SECONDARY_BACKGROUND_COLOR
+    value: "#f0f2f6"
+  - key: STREAMLIT_THEME_TEXT_COLOR
+    value: "#262730"
+  - key: CACHE_TTL_REALTIME
+    value: 300
+  - key: CACHE_TTL_FINANCIAL
+    value: 3600
+  - key: CACHE_TTL_MARKET
+    value: 1800
+  - key: MAX_CONCURRENT_REQUESTS
+    value: 100
+  - key: RATE_LIMIT_PER_MINUTE
+    value: 60
+  - key: ENABLE_ML_FEATURES
+    value: true
+  - key: ENABLE_REALTIME_FEATURES
+    value: true
+  - key: ENABLE_ANALYTICS
+    value: true
+  - key: LOG_LEVEL
+    value: INFO
+  - key: ENABLE_MONITORING
+    value: true
+
+# Build Configuration
+build:
+  commands:
+    - echo "Building Financial Analyzer Pro Phase 5..."
+    - pip install --upgrade pip
+    - pip install -r requirements_phase4_5.txt
+    - echo "Build completed successfully"
+
+# Health Checks
+healthCheck:
+  path: /health
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
+
+# Scaling Configuration
+scaling:
+  minInstances: 1
+  maxInstances: 10
+  targetCPUUtilization: 70
+  targetMemoryUtilization: 80
+
+# Security Configuration
+security:
+  enableHTTPS: true
+  enableCORS: false
+  enableCSRF: true
+  allowedOrigins:
+    - "https://financial-analyzer-pro.onrender.com"
+    - "https://realtime-data-service.onrender.com"
+    - "https://analytics-service.onrender.com"
+
+# Monitoring and Logging
+monitoring:
+  enableMetrics: true
+  enableLogging: true
+  logLevel: INFO
+  metricsInterval: 60
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  retentionDays: 30
+
+# Performance Optimization
+performance:
+  enableCaching: true
+  cacheStrategy: "LRU"
+  enableCompression: true
+  enableMinification: true
+  staticFileCaching: true
+  apiResponseCaching: true
+
+# Feature Flags
+features:
+  machineLearning: true
+  realTimeData: true
+  advancedAnalytics: true
+  portfolioManagement: true
+  riskAssessment: true
+  technicalAnalysis: true
+  exportReports: true
+  notifications: true
+  mobileOptimization: true
+  darkMode: true
+  apiAccess: true
+  webhookSupport: true
