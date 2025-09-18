@@ -186,3 +186,4 @@ def get_stock_data(symbol: str, period: str = "1d", interval: str = "1m") -> Tup
 def get_trending_stocks() -> List[Dict[str, Any]]:
     """Get trending stocks"""
     return realtime_service.get_trending_stocks()
+
