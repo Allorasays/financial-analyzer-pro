@@ -1,1 +1,1 @@
-web: python start_render.py
+web: streamlit run app_render_enhanced.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none
