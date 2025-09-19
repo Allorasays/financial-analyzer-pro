@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: financial-analyzer-pro-day2
+    env: python
+    plan: free
+    buildCommand: pip install --upgrade pip && pip install -r requirements_day2_analytics.txt --no-cache-dir
+    startCommand: streamlit run app_day2_enhanced_analytics.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
+      - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+        value: none
+    healthCheckPath: /
+    autoDeploy: true
+    region: oregon
