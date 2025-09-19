@@ -458,35 +458,69 @@ def calculate_sentiment_indicators(data):
         return {}
 
 def predict_price_ml(data, symbol, periods=5):
-    """Enhanced ML prediction with more features"""
+    """Enhanced ML prediction with robust error handling"""
     if not SKLEARN_AVAILABLE:
         return None, "ML library not available"
     
     try:
-        # Enhanced features
-        features = ['Close', 'Volume', 'RSI', 'SMA_20', 'MACD', 'BB_Position', 'Stoch_K', 'ATR']
-        available_features = [f for f in features if f in data.columns]
+        # Start with basic features that are more likely to be available
+        basic_features = ['Close', 'Volume']
+        enhanced_features = ['RSI', 'SMA_20', 'MACD', 'BB_Position', 'Stoch_K', 'ATR']
         
-        if len(available_features) < 3:
-            return None, "Insufficient features for prediction"
+        # Check which features are available and have valid data
+        available_features = []
+        for feature in basic_features + enhanced_features:
+            if feature in data.columns and not data[feature].isna().all():
+                available_features.append(feature)
         
-        df_ml = data[available_features].dropna()
+        # Fallback to basic features if enhanced features are not available
+        if len(available_features) < 2:
+            # Try with just Close and Volume
+            basic_available = [f for f in basic_features if f in data.columns]
+            if len(basic_available) >= 2:
+                available_features = basic_available
+            else:
+                return None, "Insufficient features for prediction"
+        
+        # Create ML dataset
+        df_ml = data[available_features].copy()
+        
+        # Fill any remaining NaN values with forward fill, then backward fill
+        df_ml = df_ml.fillna(method='ffill').fillna(method='bfill')
+        
+        # Remove any rows that still have NaN values
+        df_ml = df_ml.dropna()
+        
         if len(df_ml) < 20:
             return None, "Insufficient data for prediction"
         
+        # Create target variable
         df_ml['Target'] = df_ml['Close'].shift(-periods)
         df_ml = df_ml.dropna()
         
         if len(df_ml) < 10:
             return None, "Insufficient data after creating target"
         
+        # Prepare features and target
         feature_cols = [col for col in available_features if col != 'Close']
+        if len(feature_cols) == 0:
+            return None, "No valid features for prediction"
+        
         X = df_ml[feature_cols]
         y = df_ml['Target']
         
+        # Check for any infinite or NaN values
+        if X.isna().any().any() or np.isinf(X).any().any():
+            return None, "Invalid data values in features"
+        
+        if y.isna().any() or np.isinf(y).any():
+            return None, "Invalid data values in target"
+        
+        # Train model
         model = LinearRegression()
         model.fit(X, y)
         
+        # Make predictions
         last_features = X.iloc[-1:].values
         future_prices = []
         current_price = data['Close'].iloc[-1]
@@ -494,11 +528,23 @@ def predict_price_ml(data, symbol, periods=5):
         for i in range(periods):
             pred_price = model.predict(last_features)[0]
             future_prices.append(pred_price)
-            if len(last_features[0]) > 0:
-                last_features[0][0] = pred_price
+            
+            # Update features for next prediction (simple approach)
+            if len(last_features[0]) > 0 and 'Volume' in feature_cols:
+                # Update volume with a simple trend
+                vol_idx = feature_cols.index('Volume') if 'Volume' in feature_cols else 0
+                last_features[0][vol_idx] = last_features[0][vol_idx] * 0.99  # Slight decrease
         
+        # Create prediction dates
         last_date = data.index[-1]
         prediction_dates = [last_date + timedelta(days=i+1) for i in range(periods)]
+        
+        # Calculate R² score safely
+        try:
+            y_pred = model.predict(X)
+            r2 = r2_score(y, y_pred) if len(y) > 1 else 0
+        except:
+            r2 = 0
         
         return {
             'predictions': future_prices,
@@ -506,7 +552,7 @@ def predict_price_ml(data, symbol, periods=5):
             'current_price': current_price,
             'model_type': 'Enhanced Linear Regression',
             'features_used': len(feature_cols),
-            'r2_score': r2_score(y, model.predict(X)) if len(y) > 1 else 0
+            'r2_score': r2
         }, None
         
     except Exception as e:
