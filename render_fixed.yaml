@@ -1,10 +1,10 @@
 services:
   - type: web
-    name: financial-analyzer-fixed
+    name: financial-analyzer-pro-fixed
     env: python
     plan: free
-    buildCommand: pip install streamlit pandas plotly yfinance numpy requests --no-cache-dir
-    startCommand: python start.py
+    buildCommand: pip install --upgrade pip && pip install -r requirements_render_fixed.txt --no-cache-dir
+    startCommand: streamlit run app_render_fixed.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -12,16 +12,12 @@ services:
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-      - key: STREAMLIT_SERVER_PORT
-        value: 8501
       - key: STREAMLIT_SERVER_ENABLE_CORS
         value: false
       - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
         value: false
-
-
-
-
-
-
-
+      - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+        value: none
+    healthCheckPath: /
+    autoDeploy: true
+    region: oregon
