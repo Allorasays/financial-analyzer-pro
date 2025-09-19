@@ -11,7 +11,6 @@ import time
 import os
 import sqlite3
 import hashlib
-import json
 
 warnings.filterwarnings('ignore')
 
@@ -45,7 +44,6 @@ class UserPreferences:
             'default_symbol': 'AAPL',
             'default_timeframe': '1mo',
             'show_advanced_indicators': True,
-            'auto_refresh': False,
             'chart_height': 600,
             'prediction_horizon': 5
         }
@@ -96,22 +94,6 @@ class MLAccuracyTracker:
             )
         ''')
         
-        # Create accuracy metrics table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS accuracy_metrics (
-                id TEXT PRIMARY KEY,
-                symbol TEXT NOT NULL,
-                model_type TEXT NOT NULL,
-                total_predictions INTEGER DEFAULT 0,
-                correct_predictions INTEGER DEFAULT 0,
-                accuracy_percentage REAL DEFAULT 0.0,
-                mae REAL DEFAULT 0.0,
-                rmse REAL DEFAULT 0.0,
-                directional_accuracy REAL DEFAULT 0.0,
-                last_updated TEXT NOT NULL
-            )
-        ''')
-        
         conn.commit()
         conn.close()
     
@@ -143,37 +125,17 @@ class MLAccuracyTracker:
         
         return prediction_id
     
-    def update_actual_price(self, symbol, date, actual_price):
-        """Update actual price when available"""
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            UPDATE predictions 
-            SET actual_price = ?, updated_at = ?
-            WHERE symbol = ? AND prediction_date = ?
-        ''', (actual_price, datetime.now().isoformat(), symbol, date))
-        
-        conn.commit()
-        conn.close()
-    
-    def calculate_accuracy_metrics(self, symbol, model_type=None):
+    def calculate_accuracy_metrics(self, symbol):
         """Calculate accuracy metrics for a symbol"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
-        query = '''
-            SELECT predicted_price, actual_price, prediction_horizon, model_type
+        cursor.execute('''
+            SELECT predicted_price, actual_price, prediction_horizon
             FROM predictions 
             WHERE symbol = ? AND actual_price IS NOT NULL
-        '''
-        params = [symbol]
+        ''', (symbol,))
         
-        if model_type:
-            query += ' AND model_type = ?'
-            params.append(model_type)
-        
-        cursor.execute(query, params)
         results = cursor.fetchall()
         conn.close()
         
@@ -183,13 +145,11 @@ class MLAccuracyTracker:
                 'accuracy_percentage': 0.0,
                 'mae': 0.0,
                 'rmse': 0.0,
-                'directional_accuracy': 0.0,
                 'recent_accuracy': 0.0
             }
         
         predicted_prices = [r[0] for r in results]
         actual_prices = [r[1] for r in results]
-        horizons = [r[2] for r in results]
         
         # Calculate metrics
         total_predictions = len(results)
@@ -203,18 +163,8 @@ class MLAccuracyTracker:
         mae = np.mean([abs(p - a) for p, a in zip(predicted_prices, actual_prices)])
         rmse = np.sqrt(np.mean([(p - a) ** 2 for p, a in zip(predicted_prices, actual_prices)]))
         
-        # Directional accuracy
-        directional_correct = 0
-        for i in range(1, len(actual_prices)):
-            pred_direction = 1 if predicted_prices[i] > predicted_prices[i-1] else -1
-            actual_direction = 1 if actual_prices[i] > actual_prices[i-1] else -1
-            if pred_direction == actual_direction:
-                directional_correct += 1
-        
-        directional_accuracy = (directional_correct / (len(actual_prices) - 1) * 100) if len(actual_prices) > 1 else 0
-        
-        # Recent accuracy (last 10 predictions)
-        recent_results = results[-10:] if len(results) >= 10 else results
+        # Recent accuracy (last 5 predictions)
+        recent_results = results[-5:] if len(results) >= 5 else results
         recent_correct = sum(1 for r in recent_results 
                            if abs(r[0] - r[1]) / r[1] < 0.05)
         recent_accuracy = (recent_correct / len(recent_results) * 100) if recent_results else 0
@@ -224,11 +174,10 @@ class MLAccuracyTracker:
             'accuracy_percentage': accuracy_percentage,
             'mae': mae,
             'rmse': rmse,
-            'directional_accuracy': directional_accuracy,
             'recent_accuracy': recent_accuracy
         }
     
-    def get_recent_predictions(self, symbol, limit=10):
+    def get_recent_predictions(self, symbol, limit=5):
         """Get recent predictions for a symbol"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
@@ -303,14 +252,6 @@ def get_theme_css(theme):
                 border-radius: 8px;
                 border-left: 4px solid #3498db;
                 margin: 0.5rem 0;
-            }
-            .stSelectbox > div > div {
-                background-color: #2c3e50;
-                color: white;
-            }
-            .stTextInput > div > div > input {
-                background-color: #2c3e50;
-                color: white;
             }
         </style>
         """
@@ -449,16 +390,8 @@ def calculate_enhanced_technical_indicators(data):
         data = data.copy()
         
         # Basic Moving Averages
-        data['SMA_5'] = data['Close'].rolling(window=5).mean()
-        data['SMA_10'] = data['Close'].rolling(window=10).mean()
         data['SMA_20'] = data['Close'].rolling(window=20).mean()
         data['SMA_50'] = data['Close'].rolling(window=50).mean()
-        data['SMA_200'] = data['Close'].rolling(window=200).mean()
-        
-        # Exponential Moving Averages
-        data['EMA_12'] = data['Close'].ewm(span=12).mean()
-        data['EMA_26'] = data['Close'].ewm(span=26).mean()
-        data['EMA_50'] = data['Close'].ewm(span=50).mean()
         
         # RSI Calculation
         delta = data['Close'].diff()
@@ -468,45 +401,17 @@ def calculate_enhanced_technical_indicators(data):
         data['RSI'] = 100 - (100 / (1 + rs))
         
         # MACD
+        data['EMA_12'] = data['Close'].ewm(span=12).mean()
+        data['EMA_26'] = data['Close'].ewm(span=26).mean()
         data['MACD'] = data['EMA_12'] - data['EMA_26']
         data['MACD_Signal'] = data['MACD'].ewm(span=9).mean()
-        data['MACD_Histogram'] = data['MACD'] - data['MACD_Signal']
         
         # Bollinger Bands
         data['BB_Middle'] = data['Close'].rolling(window=20).mean()
         bb_std = data['Close'].rolling(window=20).std()
         data['BB_Upper'] = data['BB_Middle'] + (bb_std * 2)
         data['BB_Lower'] = data['BB_Middle'] - (bb_std * 2)
-        data['BB_Width'] = data['BB_Upper'] - data['BB_Lower']
         data['BB_Position'] = (data['Close'] - data['BB_Lower']) / (data['BB_Upper'] - data['BB_Lower'])
-        
-        # Stochastic Oscillator
-        low_14 = data['Low'].rolling(window=14).min()
-        high_14 = data['High'].rolling(window=14).max()
-        data['Stoch_K'] = 100 * (data['Close'] - low_14) / (high_14 - low_14)
-        data['Stoch_D'] = data['Stoch_K'].rolling(window=3).mean()
-        
-        # Williams %R
-        data['Williams_R'] = -100 * (high_14 - data['Close']) / (high_14 - low_14)
-        
-        # Commodity Channel Index (CCI)
-        typical_price = (data['High'] + data['Low'] + data['Close']) / 3
-        sma_tp = typical_price.rolling(window=20).mean()
-        mad = typical_price.rolling(window=20).apply(lambda x: np.mean(np.abs(x - x.mean())))
-        data['CCI'] = (typical_price - sma_tp) / (0.015 * mad)
-        
-        # Average True Range (ATR)
-        high_low = data['High'] - data['Low']
-        high_close = np.abs(data['High'] - data['Close'].shift())
-        low_close = np.abs(data['Low'] - data['Close'].shift())
-        true_range = np.maximum(high_low, np.maximum(high_close, low_close))
-        data['ATR'] = true_range.rolling(window=14).mean()
-        
-        # Volume Indicators
-        data['Volume_SMA'] = data['Volume'].rolling(window=20).mean()
-        data['Volume_Ratio'] = data['Volume'] / data['Volume_SMA']
-        data['OBV'] = (data['Volume'] * np.sign(data['Close'].diff())).cumsum()
-        data['VPT'] = (data['Volume'] * (data['Close'] / data['Close'].shift() - 1)).cumsum()
         
         return data
     except Exception as e:
@@ -519,17 +424,17 @@ def predict_price_ml(data, symbol, periods=5):
         return None, "ML library not available"
     
     try:
-        # Start with basic features that are more likely to be available
+        # Start with basic features
         basic_features = ['Close', 'Volume']
-        enhanced_features = ['RSI', 'SMA_20', 'MACD', 'BB_Position', 'Stoch_K', 'ATR']
+        enhanced_features = ['RSI', 'SMA_20', 'MACD', 'BB_Position']
         
-        # Check which features are available and have valid data
+        # Check which features are available
         available_features = []
         for feature in basic_features + enhanced_features:
             if feature in data.columns and not data[feature].isna().all():
                 available_features.append(feature)
         
-        # Fallback to basic features if enhanced features are not available
+        # Fallback to basic features if needed
         if len(available_features) < 2:
             basic_available = [f for f in basic_features if f in data.columns]
             if len(basic_available) >= 2:
@@ -560,7 +465,7 @@ def predict_price_ml(data, symbol, periods=5):
         X = df_ml[feature_cols]
         y = df_ml['Target']
         
-        # Check for any infinite or NaN values
+        # Check for invalid values
         if X.isna().any().any() or np.isinf(X).any().any():
             return None, "Invalid data values in features"
         
@@ -616,10 +521,10 @@ def predict_price_ml(data, symbol, periods=5):
 def create_enhanced_chart(data, symbol, theme='light'):
     """Create enhanced chart with theme support"""
     fig = make_subplots(
-        rows=4, cols=1,
-        subplot_titles=(f'{symbol} - Price Chart', 'RSI', 'MACD', 'Volume'),
+        rows=3, cols=1,
+        subplot_titles=(f'{symbol} - Price Chart', 'RSI', 'MACD'),
         vertical_spacing=0.05,
-        row_heights=[0.4, 0.2, 0.2, 0.2]
+        row_heights=[0.6, 0.2, 0.2]
     )
     
     # Price chart with candlesticks
@@ -707,34 +612,19 @@ def create_enhanced_chart(data, symbol, theme='light'):
                 line=dict(color='red', width=2)
             ), row=3, col=1)
     
-    # Volume
-    fig.add_trace(go.Bar(
-        x=data.index,
-        y=data['Volume'],
-        name='Volume',
-        marker_color='lightblue'
-    ), row=4, col=1)
-    
-    # Update layout with theme
-    layout_color = '#2c3e50' if theme == 'dark' else '#ffffff'
-    text_color = '#ffffff' if theme == 'dark' else '#000000'
-    
+    # Update layout
     fig.update_layout(
         title=f'{symbol} - Enhanced Technical Analysis',
         height=preferences.get('chart_height', 600),
         showlegend=True,
-        hovermode='x unified',
-        plot_bgcolor=layout_color,
-        paper_bgcolor=layout_color,
-        font_color=text_color
+        hovermode='x unified'
     )
     
     # Update axes
-    fig.update_xaxes(title_text="Date", row=4, col=1)
+    fig.update_xaxes(title_text="Date", row=3, col=1)
     fig.update_yaxes(title_text="Price ($)", row=1, col=1)
     fig.update_yaxes(title_text="RSI", row=2, col=1)
     fig.update_yaxes(title_text="MACD", row=3, col=1)
-    fig.update_yaxes(title_text="Volume", row=4, col=1)
     
     return fig
 
@@ -751,7 +641,7 @@ def main():
     st.markdown("""
     <div class="success-message">
         <h4>🚀 Day 3: User Experience Enhanced</h4>
-        <p>✅ Theme Toggle | ✅ Responsive Design | ✅ User Preferences | ✅ ML Accuracy Tracking | ✅ Keyboard Shortcuts</p>
+        <p>✅ Theme Toggle | ✅ User Preferences | ✅ ML Accuracy Tracking | ✅ Responsive Design</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -782,7 +672,7 @@ def main():
     chart_height = st.sidebar.slider("Chart Height", 400, 800, preferences.get('chart_height', 600))
     preferences.set('chart_height', chart_height)
     
-    # Interface shortcuts info
+    # Quick actions info
     st.sidebar.subheader("⌨️ Quick Actions")
     st.sidebar.markdown("""
     - **Analyze Button**: Click to analyze current symbol
@@ -814,11 +704,8 @@ def main():
         timeframe = st.selectbox("Timeframe", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], 
                                index=["1mo", "3mo", "6mo", "1y", "2y", "5y"].index(preferences.get('default_timeframe', '1mo')))
     
-    # Analyze button with keyboard shortcut
-    if st.button("Analyze Stock", type="primary", key="analyze_btn") or st.session_state.get('analyze_triggered', False):
-        if st.session_state.get('analyze_triggered', False):
-            st.session_state.analyze_triggered = False
-        
+    # Analyze button
+    if st.button("Analyze Stock", type="primary", key="analyze_btn"):
         if symbol:
             with st.spinner(f"Analyzing {symbol} with enhanced UX..."):
                 # Get data
@@ -857,10 +744,6 @@ def main():
                                 rsi = data['RSI'].iloc[-1]
                                 rsi_status = "Overbought" if rsi > 70 else "Oversold" if rsi < 30 else "Neutral"
                                 st.metric("RSI", f"{rsi:.1f}", help=f"Status: {rsi_status}")
-                            
-                            if 'Stoch_K' in data.columns:
-                                stoch = data['Stoch_K'].iloc[-1]
-                                st.metric("Stochastic %K", f"{stoch:.1f}")
                         
                         with col2:
                             st.markdown("**Trend Indicators**")
@@ -881,9 +764,9 @@ def main():
                         
                         with col4:
                             st.markdown("**Volume Indicators**")
-                            if 'Volume_Ratio' in data.columns:
-                                vol_ratio = data['Volume_Ratio'].iloc[-1]
-                                st.metric("Volume Ratio", f"{vol_ratio:.2f}")
+                            if 'Volume' in data.columns:
+                                vol = data['Volume'].iloc[-1]
+                                st.metric("Current Volume", f"{vol:,}")
                     
                     # ML Predictions with accuracy tracking
                     st.subheader("🤖 ML Price Predictions & Accuracy Tracking")
@@ -921,7 +804,7 @@ def main():
                             with col3:
                                 st.metric("Recent Accuracy", f"{accuracy_metrics['recent_accuracy']:.1f}%")
                             with col4:
-                                st.metric("Directional Accuracy", f"{accuracy_metrics['directional_accuracy']:.1f}%")
+                                st.metric("MAE", f"${accuracy_metrics['mae']:.2f}")
                             
                             # Show recent predictions
                             recent_predictions = accuracy_tracker.get_recent_predictions(symbol, 5)
@@ -942,14 +825,6 @@ def main():
                     st.success(f"Enhanced analysis completed successfully for {symbol}")
                 else:
                     st.error(f"No data available for {symbol}")
-
-    # Keyboard shortcuts info (removed problematic JavaScript)
-    st.markdown("""
-    <div class="info-message">
-        <h4>⌨️ Keyboard Shortcuts Available</h4>
-        <p>Use the buttons in the interface for the best experience. Keyboard shortcuts are being optimized for better compatibility.</p>
-    </div>
-    """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
