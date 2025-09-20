@@ -187,3 +187,4 @@ def get_trending_stocks() -> List[Dict[str, Any]]:
     """Get trending stocks"""
     return realtime_service.get_trending_stocks()
 
+

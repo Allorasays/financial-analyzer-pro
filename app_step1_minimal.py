@@ -54,3 +54,4 @@ st.info("Next: Add real market data with yfinance")
 
 
 
+

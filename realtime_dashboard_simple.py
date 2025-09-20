@@ -277,3 +277,4 @@ def display_price_alerts():
     st.subheader("📋 Current Alerts")
     st.info("No active alerts. Set some alerts above to get started!")
 
+
