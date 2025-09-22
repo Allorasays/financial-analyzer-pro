@@ -1,15 +1,15 @@
 services:
   # Main Financial Analyzer Pro Application - Latest Stable Version
   - type: web
-    name: financial-analyzer-pro-latest
+    name: financial-analyzer-pro-enhanced
     env: python
-    plan: starter
+    plan: free
     buildCommand: |
-      echo "Building Financial Analyzer Pro - Latest Stable Version..."
+      echo "Building Financial Analyzer Pro - Enhanced Version..."
       pip install --upgrade pip
-      pip install -r requirements_latest.txt --no-cache-dir
+      pip install -r requirements.txt --no-cache-dir
       echo "Build completed successfully"
-    startCommand: streamlit run app_enhanced_stable.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false
+    startCommand: streamlit run app_enhanced_stable.py --server.port=$PORT --server.address=0.0.0.0 --server.headless=true --server.enableCORS=false --server.enableXsrfProtection=false --server.fileWatcherType=none
     envVars:
       - key: PORT
         value: 8501
@@ -25,6 +25,8 @@ services:
         value: false
       - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
         value: false
+      - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+        value: none
       - key: PYTHONPATH
         value: .
       - key: PYTHON_VERSION
