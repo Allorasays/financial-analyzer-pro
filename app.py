@@ -1065,8 +1065,9 @@ def main():
     # Main navigation
     st.sidebar.title("📊 Analysis Tools")
     page = st.sidebar.selectbox("Choose Analysis", [
-        "📈 Enhanced ML Analysis", 
-        "🔍 Anomaly Detection", 
+        "📈 Enhanced ML Analysis",
+        "💼 Portfolio Management",
+        "🔍 Anomaly Detection",
         "📊 Risk Assessment",
         "📊 Market Overview",
         "📈 Technical Charts",
@@ -1076,6 +1077,9 @@ def main():
     # Route to appropriate page
     if page == "📈 Enhanced ML Analysis":
         enhanced_ml_analysis_page()
+    elif page == "💼 Portfolio Management":
+        from portfolio_ui import show_portfolio_management
+        show_portfolio_management()
     elif page == "🔍 Anomaly Detection":
         anomaly_detection_page()
     elif page == "📊 Risk Assessment":
