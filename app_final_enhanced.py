@@ -523,6 +523,7 @@ def show_enhanced_portfolio():
 
 @require_auth
 def show_notifications():
+    show_advanced = st.sidebar.checkbox("Show Advanced Indicators", value=False)
     """Show notifications and alerts page"""
     st.header("🔔 Notifications & Alerts")
     
@@ -786,6 +787,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

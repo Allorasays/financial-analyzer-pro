@@ -252,6 +252,7 @@ portfolio_db = PortfolioDatabase()
 # User Preferences System (from Day 3)
 class UserPreferences:
     def __init__(self):
+        show_advanced = st.sidebar.checkbox("Show Advanced Indicators", value=False)
         self.preferences = {
             'theme': 'light',
             'default_symbol': 'AAPL',
@@ -691,6 +692,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 

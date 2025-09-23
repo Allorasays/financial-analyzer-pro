@@ -10,3 +10,4 @@ web: pip install streamlit pandas plotly yfinance numpy requests && streamlit ru
 
 
 
+

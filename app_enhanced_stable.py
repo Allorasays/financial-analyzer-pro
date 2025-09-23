@@ -1995,8 +1995,8 @@ def main():
                 market_data = None
         else:
             # Manual refresh
-        if st.button("🔄 Refresh Market Data", type="primary"):
-            with st.spinner("Fetching market data..."):
+            if st.button("🔄 Refresh Market Data", type="primary"):
+                with st.spinner("Fetching market data..."):
                     market_data = get_market_overview_enhanced(indices_config)
                     if market_data:
                         st.session_state.market_data = market_data
@@ -2057,7 +2057,7 @@ def main():
                 st.info(f"📊 Data last updated: {time_since_update:.0f} seconds ago")
         
         elif not auto_refresh:
-            st.info("📝 Click 'Refresh Market Data' to load current market information")
+            st.info("Click 'Refresh Market Data' to load current market information")
         
         # Enhanced features section
         st.subheader("🔧 Enhanced Market Features")

@@ -668,6 +668,7 @@ def show_watchlist():
 
 @require_auth
 def show_market_overview():
+    show_advanced = st.sidebar.checkbox("Show Advanced Indicators", value=False)
     """Show market overview page"""
     st.header("🌍 Market Overview")
     
@@ -743,6 +744,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
