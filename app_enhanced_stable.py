@@ -2008,27 +2008,27 @@ def main():
                 market_data = st.session_state.get('market_data', None)
         
         # Display market data
-                if market_data:
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    indices = [
-                        ('^GSPC', 'S&P 500', col1),
-                        ('^IXIC', 'NASDAQ', col2),
-                        ('^DJI', 'DOW', col3),
-                        ('^VIX', 'VIX', col4)
-                    ]
-                    
-                    for symbol, name, col in indices:
-                        with col:
-                            if symbol in market_data:
-                                data = market_data[symbol]
-                                change_color = "🟢" if data['change'] >= 0 else "🔴"
-                                st.metric(
-                                    name,
-                                    f"${data['price']:.2f}",
-                                    f"{change_color} {data['change_percent']:+.2f}%"
-                                )
-                else:
+        if market_data:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            indices = [
+                ('^GSPC', 'S&P 500', col1),
+                ('^IXIC', 'NASDAQ', col2),
+                ('^DJI', 'DOW', col3),
+                ('^VIX', 'VIX', col4)
+            ]
+            
+            for symbol, name, col in indices:
+                with col:
+                    if symbol in market_data:
+                        data = market_data[symbol]
+                        change_color = "🟢" if data['change'] >= 0 else "🔴"
+                        st.metric(
+                            name,
+                            f"${data['price']:.2f}",
+                            f"{change_color} {data['change_percent']:+.2f}%"
+                        )
+                    else:
                         st.error(f"❌ {name} data unavailable")
             
             # Market summary
@@ -2048,8 +2048,11 @@ def main():
                 st.metric("Average Change", f"{avg_change:+.2f}%")
             
             with col3:
-                active_sources = len([s for s in enhanced_fetcher.source_manager.sources.values() if s['enabled']])
-                st.metric("Data Sources", f"{active_sources} active")
+                try:
+                    active_sources = len([s for s in enhanced_fetcher.source_manager.sources.values() if s['enabled']])
+                    st.metric("Data Sources", f"{active_sources} active")
+                except:
+                    st.metric("Data Sources", "Enhanced")
             
             # Data freshness indicator
             if 'last_market_refresh' in st.session_state:
