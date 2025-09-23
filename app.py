@@ -1092,7 +1092,7 @@ def enhanced_ml_analysis_page():
     st.header("📈 Enhanced ML Stock Analysis")
     
     # Define show_advanced for this function
-    show_advanced = st.sidebar.checkbox("Show Advanced Indicators", value=True)
+    show_advanced = st.sidebar.checkbox("Show Advanced Indicators", value=True, key="enhanced_ml_advanced")
     
     col1, col2 = st.columns([2, 1])
     with col1:
