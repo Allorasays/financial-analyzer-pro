@@ -1614,8 +1614,19 @@ def show_portfolio_management():
     """Main portfolio management interface"""
     st.header("💼 Portfolio Management - Day 4 Complete")
     
-    # Initialize portfolio manager
-    from portfolio_manager import PortfolioManager
+    # Initialize portfolio manager with robust import fallback
+    try:
+        from portfolio_manager import PortfolioManager
+    except Exception:
+        import importlib.util, os
+        module_path = os.path.join(os.path.dirname(__file__), 'portfolio_manager.py')
+        spec = importlib.util.spec_from_file_location('portfolio_manager', module_path)
+        if spec and spec.loader:
+            pm = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(pm)
+            PortfolioManager = getattr(pm, 'PortfolioManager')
+        else:
+            raise
     portfolio_manager = PortfolioManager()
     
     # Sidebar controls
