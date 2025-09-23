@@ -1612,7 +1612,7 @@ def get_current_prices(symbols: list) -> dict:
 
 def show_portfolio_management():
     """Main portfolio management interface"""
-    st.header("💼 Portfolio Management")
+    st.header("💼 Portfolio Management - Day 4 Complete")
     
     # Initialize portfolio manager
     from portfolio_manager import PortfolioManager
