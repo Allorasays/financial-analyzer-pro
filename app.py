@@ -1348,6 +1348,158 @@ def get_market_overview():
     
     return overview
 
+def get_world_markets():
+    """Get global market indices data"""
+    try:
+        world_markets = {}
+        
+        # Major global indices
+        global_indices = {
+            '^GSPC': 'S&P 500 (US)',
+            '^IXIC': 'NASDAQ (US)', 
+            '^DJI': 'Dow Jones (US)',
+            '^FTSE': 'FTSE 100 (UK)',
+            '^N225': 'Nikkei 225 (Japan)',
+            '^GDAXI': 'DAX (Germany)',
+            '^FCHI': 'CAC 40 (France)',
+            '^HSI': 'Hang Seng (Hong Kong)',
+            '^AXJO': 'ASX 200 (Australia)',
+            '^BSESN': 'BSE Sensex (India)',
+            '^BVSP': 'Bovespa (Brazil)',
+            '^MXX': 'IPC (Mexico)'
+        }
+        
+        for symbol, name in global_indices.items():
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="2d", timeout=10)
+                
+                if not hist.empty and len(hist) >= 2:
+                    current_price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2]
+                    change = current_price - prev_price
+                    change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
+                    
+                    world_markets[name] = {
+                        'symbol': symbol,
+                        'price': current_price,
+                        'change': change,
+                        'change_percent': change_pct,
+                        'volume': hist['Volume'].iloc[-1] if 'Volume' in hist.columns else 0
+                    }
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+                continue
+        
+        return world_markets if world_markets else None
+        
+    except Exception as e:
+        print(f"World markets error: {e}")
+        return None
+
+def get_forex_data():
+    """Get major forex currency pairs data"""
+    try:
+        forex_data = {}
+        
+        # Major currency pairs
+        forex_pairs = {
+            'EURUSD=X': 'EUR/USD',
+            'GBPUSD=X': 'GBP/USD', 
+            'USDJPY=X': 'USD/JPY',
+            'USDCHF=X': 'USD/CHF',
+            'AUDUSD=X': 'AUD/USD',
+            'USDCAD=X': 'USD/CAD',
+            'NZDUSD=X': 'NZD/USD',
+            'EURGBP=X': 'EUR/GBP',
+            'EURJPY=X': 'EUR/JPY',
+            'GBPJPY=X': 'GBP/JPY',
+            'AUDCAD=X': 'AUD/CAD',
+            'EURCHF=X': 'EUR/CHF'
+        }
+        
+        for symbol, pair in forex_pairs.items():
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="2d", timeout=10)
+                
+                if not hist.empty and len(hist) >= 2:
+                    current_price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2]
+                    change = current_price - prev_price
+                    change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
+                    
+                    forex_data[pair] = {
+                        'symbol': symbol,
+                        'price': current_price,
+                        'change': change,
+                        'change_pct': change_pct,
+                        'high_24h': hist['High'].iloc[-1],
+                        'low_24h': hist['Low'].iloc[-1]
+                    }
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+                continue
+        
+        return forex_data if forex_data else None
+        
+    except Exception as e:
+        print(f"Forex data error: {e}")
+        return None
+
+def get_crypto_data():
+    """Get major cryptocurrency data"""
+    try:
+        crypto_data = {}
+        
+        # Major cryptocurrencies
+        crypto_symbols = {
+            'BTC-USD': 'Bitcoin',
+            'ETH-USD': 'Ethereum',
+            'BNB-USD': 'Binance Coin',
+            'ADA-USD': 'Cardano',
+            'SOL-USD': 'Solana',
+            'XRP-USD': 'Ripple',
+            'DOT-USD': 'Polkadot',
+            'DOGE-USD': 'Dogecoin',
+            'AVAX-USD': 'Avalanche',
+            'MATIC-USD': 'Polygon',
+            'LTC-USD': 'Litecoin',
+            'LINK-USD': 'Chainlink'
+        }
+        
+        for symbol, name in crypto_symbols.items():
+            try:
+                ticker = yf.Ticker(symbol)
+                hist = ticker.history(period="2d", timeout=10)
+                info = ticker.info
+                
+                if not hist.empty and len(hist) >= 2:
+                    current_price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2]
+                    change = current_price - prev_price
+                    change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
+                    
+                    crypto_data[name] = {
+                        'symbol': symbol,
+                        'price': current_price,
+                        'change': change,
+                        'change_pct': change_pct,
+                        'volume_24h': info.get('volume24Hr', hist['Volume'].iloc[-1] if 'Volume' in hist.columns else 0),
+                        'market_cap': info.get('marketCap', 0),
+                        'high_24h': hist['High'].iloc[-1],
+                        'low_24h': hist['Low'].iloc[-1]
+                    }
+            except Exception as e:
+                print(f"Error fetching {symbol}: {e}")
+                continue
+        
+        return crypto_data if crypto_data else None
+        
+    except Exception as e:
+        print(f"Crypto data error: {e}")
+        return None
+
 def create_candlestick_chart(data, symbol):
     """Create professional candlestick chart"""
     fig = go.Figure(data=go.Candlestick(
@@ -1422,8 +1574,8 @@ def main():
     # Status
     st.markdown("""
     <div class="success-message">
-        <h4>🚀 Day 1-7: Enhanced Features</h4>
-        <p>✅ Smart Caching | ✅ ML Accuracy Tracking | ✅ Theme Toggle | ✅ User Preferences | ✅ Portfolio Management | ✅ Watchlist System | ✅ Advanced Analytics (20+ Indicators) | ✅ Trend Analysis | ✅ Sector Analysis | ✅ Market Breadth | ✅ Economic Calendar | ✅ News Sentiment | ✅ Robust Data Fallback</p>
+        <h4>🚀 Day 1-8: Enhanced Features</h4>
+        <p>✅ Smart Caching | ✅ ML Accuracy Tracking | ✅ Theme Toggle | ✅ User Preferences | ✅ Portfolio Management | ✅ Watchlist System | ✅ Advanced Analytics (20+ Indicators) | ✅ Trend Analysis | ✅ World Markets | ✅ Forex Trading | ✅ Cryptocurrency | ✅ Sector Analysis | ✅ Market Breadth | ✅ Economic Calendar | ✅ News Sentiment | ✅ Robust Data Fallback</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -1515,6 +1667,9 @@ def main():
         "📈 Enhanced ML Analysis",
         "💼 Portfolio Management",
         "👀 Watchlist Management",
+        "🌍 World Markets",
+        "💱 Forex Trading",
+        "₿ Cryptocurrency",
         "🔍 Anomaly Detection",
         "📊 Risk Assessment",
         "📊 Market Overview",
@@ -1529,6 +1684,12 @@ def main():
         show_portfolio_management()
     elif page == "👀 Watchlist Management":
         watchlist_management_page()
+    elif page == "🌍 World Markets":
+        world_markets_page()
+    elif page == "💱 Forex Trading":
+        forex_trading_page()
+    elif page == "₿ Cryptocurrency":
+        cryptocurrency_page()
     elif page == "🔍 Anomaly Detection":
         anomaly_detection_page()
     elif page == "📊 Risk Assessment":
@@ -2313,127 +2474,13 @@ def show_portfolio_management():
     """Main portfolio management interface"""
     st.header("💼 Portfolio Management - Day 4 Complete")
     
-    # Initialize portfolio manager with robust import fallback
+    # Initialize portfolio manager
     try:
         from portfolio_manager import PortfolioManager
-    except Exception:
-        import importlib.util, os, sqlite3, hashlib
-        from datetime import datetime, timedelta
-        module_path = os.path.join(os.path.dirname(__file__), 'portfolio_manager.py')
-        try:
-            spec = importlib.util.spec_from_file_location('portfolio_manager', module_path)
-            if spec and spec.loader:
-                pm = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(pm)
-                PortfolioManager = getattr(pm, 'PortfolioManager')
-            else:
-                raise FileNotFoundError
-        except FileNotFoundError:
-            class PortfolioManager:  # Minimal inline fallback
-                def __init__(self, db_path: str = "portfolio.db"):
-                    self.db_path = db_path
-                    self._init_database()
-                def _init_database(self):
-                    conn = sqlite3.connect(self.db_path)
-                    c = conn.cursor()
-                    c.execute('''CREATE TABLE IF NOT EXISTS portfolios (
-                        id TEXT PRIMARY KEY, name TEXT, description TEXT,
-                        created_at TEXT, updated_at TEXT, is_active INTEGER DEFAULT 1)''')
-                    c.execute('''CREATE TABLE IF NOT EXISTS positions (
-                        id TEXT PRIMARY KEY, portfolio_id TEXT, symbol TEXT,
-                        quantity REAL, purchase_price REAL, purchase_date TEXT,
-                        current_price REAL, last_updated TEXT, notes TEXT)''')
-                    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
-                        id TEXT PRIMARY KEY, portfolio_id TEXT, symbol TEXT,
-                        transaction_type TEXT, quantity REAL, price REAL,
-                        transaction_date TEXT, fees REAL DEFAULT 0, notes TEXT)''')
-                    c.execute('''CREATE TABLE IF NOT EXISTS portfolio_performance (
-                        id TEXT PRIMARY KEY, portfolio_id TEXT, date TEXT,
-                        total_value REAL, total_cost REAL, total_pnl REAL,
-                        total_pnl_percent REAL, created_at TEXT)''')
-                    conn.commit(); conn.close()
-                def create_portfolio(self, name, description=""):
-                    pid = hashlib.md5(f"{name}_{datetime.now()}".encode()).hexdigest()
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    now = datetime.now().isoformat()
-                    c.execute('INSERT INTO portfolios VALUES (?,?,?,?,?,1)', (pid, name, description, now, now))
-                    conn.commit(); conn.close(); return pid
-                def get_portfolios(self):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('SELECT id,name,description,created_at,updated_at FROM portfolios WHERE is_active=1 ORDER BY created_at DESC')
-                    rows = c.fetchall(); conn.close()
-                    return [{'id':r[0],'name':r[1],'description':r[2],'created_at':r[3],'updated_at':r[4]} for r in rows]
-                def add_position(self, portfolio_id,symbol,quantity,purchase_price,purchase_date,notes=""):
-                    pos_id = hashlib.md5(f"{portfolio_id}_{symbol}_{datetime.now()}".encode()).hexdigest()
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    now = datetime.now().isoformat()
-                    c.execute('INSERT INTO positions VALUES (?,?,?,?,?,?,?,?,?)', (pos_id,portfolio_id,symbol,quantity,purchase_price,purchase_date,None,now,notes))
-                    tx_id = hashlib.md5(f"{pos_id}_buy_{datetime.now()}".encode()).hexdigest()
-                    c.execute('INSERT INTO transactions (id,portfolio_id,symbol,transaction_type,quantity,price,transaction_date,notes) VALUES (?,?,?,?,?,?,?,?)', (tx_id,portfolio_id,symbol,'BUY',quantity,purchase_price,purchase_date,notes))
-                    c.execute('UPDATE portfolios SET updated_at=? WHERE id=?', (now, portfolio_id))
-                    conn.commit(); conn.close(); return pos_id
-                def remove_position(self, portfolio_id,symbol,quantity,sell_price,sell_date,notes=""):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('SELECT id,quantity FROM positions WHERE portfolio_id=? AND symbol=?', (portfolio_id,symbol))
-                    row = c.fetchone();
-                    if not row: conn.close(); raise ValueError('No position found')
-                    pos_id, qty = row
-                    if quantity > qty: conn.close(); raise ValueError('Insufficient quantity')
-                    new_qty = qty - quantity
-                    if new_qty == 0:
-                        c.execute('DELETE FROM positions WHERE id=?', (pos_id,))
-                    else:
-                        c.execute('UPDATE positions SET quantity=?, last_updated=? WHERE id=?', (new_qty, datetime.now().isoformat(), pos_id))
-                    tx_id = hashlib.md5(f"{pos_id}_sell_{datetime.now()}".encode()).hexdigest()
-                    c.execute('INSERT INTO transactions (id,portfolio_id,symbol,transaction_type,quantity,price,transaction_date,notes) VALUES (?,?,?,?,?,?,?,?)', (tx_id,portfolio_id,symbol,'SELL',quantity,sell_price,sell_date,notes))
-                    c.execute('UPDATE portfolios SET updated_at=? WHERE id=?', (datetime.now().isoformat(), portfolio_id))
-                    conn.commit(); conn.close(); return tx_id
-                def get_positions(self, portfolio_id):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('SELECT symbol,quantity,purchase_price,purchase_date,current_price,last_updated,notes FROM positions WHERE portfolio_id=? ORDER BY symbol', (portfolio_id,))
-                    rows = c.fetchall(); conn.close()
-                    return [{'symbol':r[0],'quantity':r[1],'purchase_price':r[2],'purchase_date':r[3],'current_price':r[4],'last_updated':r[5],'notes':r[6]} for r in rows]
-                def get_transactions(self, portfolio_id):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('SELECT symbol,transaction_type,quantity,price,transaction_date,fees,notes FROM transactions WHERE portfolio_id=? ORDER BY transaction_date DESC', (portfolio_id,))
-                    rows = c.fetchall(); conn.close()
-                    return [{'symbol':r[0],'type':r[1],'quantity':r[2],'price':r[3],'date':r[4],'fees':r[5],'notes':r[6]} for r in rows]
-                def calculate_portfolio_metrics(self, portfolio_id, current_prices: dict):
-                    positions = self.get_positions(portfolio_id)
-                    total_cost=0; total_value=0; items=[]
-                    for p in positions:
-                        q=p['quantity']; cost=q*p['purchase_price']; cur=q*current_prices.get(p['symbol'], p['purchase_price'])
-                        pnl=cur-cost; pnl_pct=(pnl/cost*100) if cost>0 else 0
-                        total_cost+=cost; total_value+=cur
-                        items.append({'symbol':p['symbol'],'quantity':q,'purchase_price':p['purchase_price'],'current_price':cur/q if q else 0,'cost_basis':cost,'current_value':cur,'pnl':pnl,'pnl_percent':pnl_pct})
-                    for it in items:
-                        it['weight'] = (it['current_value']/total_value*100) if total_value>0 else 0
-                    return {'total_value':total_value,'total_cost':total_cost,'total_pnl':total_value-total_cost,'total_pnl_percent':((total_value-total_cost)/total_cost*100) if total_cost>0 else 0,'positions_count':len(items),'positions':items}
-                def update_position_prices(self, portfolio_id, current_prices: dict):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    now = datetime.now().isoformat()
-                    for sym,price in current_prices.items():
-                        c.execute('UPDATE positions SET current_price=?, last_updated=? WHERE portfolio_id=? AND symbol=?', (price, now, portfolio_id, sym))
-                    conn.commit(); conn.close()
-                def save_portfolio_performance(self, portfolio_id, metrics: dict):
-                    pid = hashlib.md5(f"{portfolio_id}_{datetime.now().date()}".encode()).hexdigest()
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('INSERT OR REPLACE INTO portfolio_performance VALUES (?,?,?,?,?,?,?,?)', (pid,portfolio_id,datetime.now().date().isoformat(),metrics['total_value'],metrics['total_cost'],metrics['total_pnl'],metrics['total_pnl_percent'],datetime.now().isoformat()))
-                    conn.commit(); conn.close()
-                def get_portfolio_performance_history(self, portfolio_id, days:int=30):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    start=(datetime.now()-timedelta(days=days)).date().isoformat()
-                    c.execute('SELECT date,total_value,total_cost,total_pnl,total_pnl_percent FROM portfolio_performance WHERE portfolio_id=? AND date>=? ORDER BY date ASC', (portfolio_id,start))
-                    rows=c.fetchall(); conn.close()
-                    return [{'date':r[0],'total_value':r[1],'total_cost':r[2],'total_pnl':r[3],'total_pnl_percent':r[4]} for r in rows]
-                def delete_portfolio(self, portfolio_id):
-                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
-                    c.execute('DELETE FROM positions WHERE portfolio_id=?', (portfolio_id,))
-                    c.execute('DELETE FROM transactions WHERE portfolio_id=?', (portfolio_id,))
-                    c.execute('DELETE FROM portfolio_performance WHERE portfolio_id=?', (portfolio_id,))
-                    c.execute('DELETE FROM portfolios WHERE id=?', (portfolio_id,))
-                    conn.commit(); conn.close()
-    portfolio_manager = PortfolioManager()
+        portfolio_manager = PortfolioManager()
+    except ImportError:
+        st.error("Portfolio Manager not found. Please ensure portfolio_manager.py is in the same directory.")
+        st.stop()
     
     # Sidebar controls
     st.sidebar.subheader("📊 Portfolio Controls")
@@ -2960,6 +3007,260 @@ def show_watchlist_alerts():
         with col4:
             # Note: In a full implementation, you'd add delete alert functionality
             st.caption("Active")
+
+def world_markets_page():
+    """Global world markets overview"""
+    st.header("🌍 World Markets - Global Indices")
+    
+    with st.spinner("Fetching global market data..."):
+        world_markets = get_world_markets()
+    
+    if world_markets:
+        # Market overview cards
+        st.subheader("📊 Global Market Performance")
+        
+        # Create columns for market cards
+        cols = st.columns(4)
+        market_items = list(world_markets.items())
+        
+        for i, (name, data) in enumerate(market_items[:8]):  # Show first 8 markets
+            col_idx = i % 4
+            with cols[col_idx]:
+                change_color = "normal" if data['change'] >= 0 else "inverse"
+                st.metric(
+                    name,
+                    f"{data['price']:.2f}",
+                    f"{data['change']:+.2f} ({data['change_percent']:+.2f}%)",
+                    delta_color=change_color
+                )
+        
+        # Detailed table
+        st.subheader("📋 Detailed Market Data")
+        
+        # Prepare data for table
+        market_df = pd.DataFrame([
+            {
+                'Market': name,
+                'Price': f"{data['price']:.2f}",
+                'Change': f"{data['change']:+.2f}",
+                'Change %': f"{data['change_percent']:+.2f}%",
+                'Volume': f"{data['volume']:,.0f}" if data['volume'] > 0 else "N/A"
+            }
+            for name, data in world_markets.items()
+        ])
+        
+        st.dataframe(market_df, use_container_width=True)
+        
+        # Performance chart
+        if len(world_markets) > 1:
+            st.subheader("📈 Market Performance Comparison")
+            
+            # Create performance comparison chart
+            fig = go.Figure()
+            
+            for name, data in world_markets.items():
+                fig.add_trace(go.Bar(
+                    name=name,
+                    x=[name],
+                    y=[data['change_percent']],
+                    marker_color='green' if data['change_percent'] >= 0 else 'red'
+                ))
+            
+            fig.update_layout(
+                title="24h Market Performance Comparison",
+                xaxis_title="Markets",
+                yaxis_title="Change %",
+                showlegend=False,
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    else:
+        st.error("Unable to fetch world markets data. Please try again later.")
+        st.info("This feature requires internet connection to fetch real-time global market data.")
+
+def forex_trading_page():
+    """Forex trading pairs analysis"""
+    st.header("💱 Forex Trading - Currency Pairs")
+    
+    with st.spinner("Fetching forex data..."):
+        forex_data = get_forex_data()
+    
+    if forex_data:
+        # Major pairs overview
+        st.subheader("💱 Major Currency Pairs")
+        
+        # Create columns for forex cards
+        cols = st.columns(4)
+        forex_items = list(forex_data.items())
+        
+        for i, (pair, data) in enumerate(forex_items[:8]):  # Show first 8 pairs
+            col_idx = i % 4
+            with cols[col_idx]:
+                change_color = "normal" if data['change'] >= 0 else "inverse"
+                st.metric(
+                    pair,
+                    f"{data['price']:.5f}",
+                    f"{data['change']:+.5f} ({data['change_pct']:+.2f}%)",
+                    delta_color=change_color
+                )
+        
+        # Detailed forex table
+        st.subheader("📋 Forex Pair Details")
+        
+        forex_df = pd.DataFrame([
+            {
+                'Pair': pair,
+                'Price': f"{data['price']:.5f}",
+                'Change': f"{data['change']:+.5f}",
+                'Change %': f"{data['change_pct']:+.2f}%",
+                'High 24h': f"{data['high_24h']:.5f}",
+                'Low 24h': f"{data['low_24h']:.5f}"
+            }
+            for pair, data in forex_data.items()
+        ])
+        
+        st.dataframe(forex_df, use_container_width=True)
+        
+        # Forex performance chart
+        if len(forex_data) > 1:
+            st.subheader("📈 Forex Performance Comparison")
+            
+            fig = go.Figure()
+            
+            for pair, data in forex_data.items():
+                fig.add_trace(go.Bar(
+                    name=pair,
+                    x=[pair],
+                    y=[data['change_pct']],
+                    marker_color='green' if data['change_pct'] >= 0 else 'red'
+                ))
+            
+            fig.update_layout(
+                title="24h Forex Performance Comparison",
+                xaxis_title="Currency Pairs",
+                yaxis_title="Change %",
+                showlegend=False,
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Forex analysis
+        st.subheader("🔍 Forex Analysis")
+        
+        # Strongest/weakest currencies
+        strongest = max(forex_data.items(), key=lambda x: x[1]['change_pct'])
+        weakest = min(forex_data.items(), key=lambda x: x[1]['change_pct'])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.success(f"🟢 **Strongest Pair:** {strongest[0]} (+{strongest[1]['change_pct']:.2f}%)")
+        with col2:
+            st.error(f"🔴 **Weakest Pair:** {weakest[0]} ({weakest[1]['change_pct']:.2f}%)")
+    
+    else:
+        st.error("Unable to fetch forex data. Please try again later.")
+        st.info("This feature requires internet connection to fetch real-time forex data.")
+
+def cryptocurrency_page():
+    """Cryptocurrency market analysis"""
+    st.header("₿ Cryptocurrency Markets")
+    
+    with st.spinner("Fetching cryptocurrency data..."):
+        crypto_data = get_crypto_data()
+    
+    if crypto_data:
+        # Top cryptocurrencies
+        st.subheader("₿ Major Cryptocurrencies")
+        
+        # Create columns for crypto cards
+        cols = st.columns(4)
+        crypto_items = list(crypto_data.items())
+        
+        for i, (name, data) in enumerate(crypto_items[:8]):  # Show first 8 cryptos
+            col_idx = i % 4
+            with cols[col_idx]:
+                change_color = "normal" if data['change'] >= 0 else "inverse"
+                price_str = f"${data['price']:,.2f}" if data['price'] > 1 else f"${data['price']:.6f}"
+                st.metric(
+                    name,
+                    price_str,
+                    f"{data['change']:+.2f} ({data['change_pct']:+.2f}%)",
+                    delta_color=change_color
+                )
+        
+        # Detailed crypto table
+        st.subheader("📋 Cryptocurrency Details")
+        
+        crypto_df = pd.DataFrame([
+            {
+                'Cryptocurrency': name,
+                'Price': f"${data['price']:,.2f}" if data['price'] > 1 else f"${data['price']:.6f}",
+                'Change': f"{data['change']:+.2f}",
+                'Change %': f"{data['change_pct']:+.2f}%",
+                'Volume 24h': f"${data['volume_24h']:,.0f}" if data['volume_24h'] > 0 else "N/A",
+                'Market Cap': f"${data['market_cap']:,.0f}" if data['market_cap'] > 0 else "N/A"
+            }
+            for name, data in crypto_data.items()
+        ])
+        
+        st.dataframe(crypto_df, use_container_width=True)
+        
+        # Crypto performance chart
+        if len(crypto_data) > 1:
+            st.subheader("📈 Cryptocurrency Performance")
+            
+            fig = go.Figure()
+            
+            for name, data in crypto_data.items():
+                fig.add_trace(go.Bar(
+                    name=name,
+                    x=[name],
+                    y=[data['change_pct']],
+                    marker_color='green' if data['change_pct'] >= 0 else 'red'
+                ))
+            
+            fig.update_layout(
+                title="24h Cryptocurrency Performance",
+                xaxis_title="Cryptocurrencies",
+                yaxis_title="Change %",
+                showlegend=False,
+                height=500
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+        
+        # Crypto market analysis
+        st.subheader("🔍 Cryptocurrency Market Analysis")
+        
+        # Top performers
+        top_gainers = sorted(crypto_data.items(), key=lambda x: x[1]['change_pct'], reverse=True)[:3]
+        top_losers = sorted(crypto_data.items(), key=lambda x: x[1]['change_pct'])[:3]
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.success("🟢 **Top Gainers:**")
+            for name, data in top_gainers:
+                st.write(f"• {name}: +{data['change_pct']:.2f}%")
+        
+        with col2:
+            st.error("🔴 **Top Losers:**")
+            for name, data in top_losers:
+                st.write(f"• {name}: {data['change_pct']:.2f}%")
+        
+        # Market sentiment
+        positive_count = sum(1 for data in crypto_data.values() if data['change_pct'] > 0)
+        total_count = len(crypto_data)
+        sentiment_pct = (positive_count / total_count) * 100 if total_count > 0 else 0
+        
+        st.info(f"📊 **Market Sentiment:** {positive_count}/{total_count} cryptocurrencies are positive ({sentiment_pct:.1f}%)")
+    
+    else:
+        st.error("Unable to fetch cryptocurrency data. Please try again later.")
+        st.info("This feature requires internet connection to fetch real-time cryptocurrency data.")
 
 if __name__ == "__main__":
     main()
