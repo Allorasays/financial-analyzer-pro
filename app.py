@@ -1618,15 +1618,122 @@ def show_portfolio_management():
     try:
         from portfolio_manager import PortfolioManager
     except Exception:
-        import importlib.util, os
+        import importlib.util, os, sqlite3, hashlib
+        from datetime import datetime, timedelta
         module_path = os.path.join(os.path.dirname(__file__), 'portfolio_manager.py')
-        spec = importlib.util.spec_from_file_location('portfolio_manager', module_path)
-        if spec and spec.loader:
-            pm = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(pm)
-            PortfolioManager = getattr(pm, 'PortfolioManager')
-        else:
-            raise
+        try:
+            spec = importlib.util.spec_from_file_location('portfolio_manager', module_path)
+            if spec and spec.loader:
+                pm = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(pm)
+                PortfolioManager = getattr(pm, 'PortfolioManager')
+            else:
+                raise FileNotFoundError
+        except FileNotFoundError:
+            class PortfolioManager:  # Minimal inline fallback
+                def __init__(self, db_path: str = "portfolio.db"):
+                    self.db_path = db_path
+                    self._init_database()
+                def _init_database(self):
+                    conn = sqlite3.connect(self.db_path)
+                    c = conn.cursor()
+                    c.execute('''CREATE TABLE IF NOT EXISTS portfolios (
+                        id TEXT PRIMARY KEY, name TEXT, description TEXT,
+                        created_at TEXT, updated_at TEXT, is_active INTEGER DEFAULT 1)''')
+                    c.execute('''CREATE TABLE IF NOT EXISTS positions (
+                        id TEXT PRIMARY KEY, portfolio_id TEXT, symbol TEXT,
+                        quantity REAL, purchase_price REAL, purchase_date TEXT,
+                        current_price REAL, last_updated TEXT, notes TEXT)''')
+                    c.execute('''CREATE TABLE IF NOT EXISTS transactions (
+                        id TEXT PRIMARY KEY, portfolio_id TEXT, symbol TEXT,
+                        transaction_type TEXT, quantity REAL, price REAL,
+                        transaction_date TEXT, fees REAL DEFAULT 0, notes TEXT)''')
+                    c.execute('''CREATE TABLE IF NOT EXISTS portfolio_performance (
+                        id TEXT PRIMARY KEY, portfolio_id TEXT, date TEXT,
+                        total_value REAL, total_cost REAL, total_pnl REAL,
+                        total_pnl_percent REAL, created_at TEXT)''')
+                    conn.commit(); conn.close()
+                def create_portfolio(self, name, description=""):
+                    pid = hashlib.md5(f"{name}_{datetime.now()}".encode()).hexdigest()
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    now = datetime.now().isoformat()
+                    c.execute('INSERT INTO portfolios VALUES (?,?,?,?,?,1)', (pid, name, description, now, now))
+                    conn.commit(); conn.close(); return pid
+                def get_portfolios(self):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('SELECT id,name,description,created_at,updated_at FROM portfolios WHERE is_active=1 ORDER BY created_at DESC')
+                    rows = c.fetchall(); conn.close()
+                    return [{'id':r[0],'name':r[1],'description':r[2],'created_at':r[3],'updated_at':r[4]} for r in rows]
+                def add_position(self, portfolio_id,symbol,quantity,purchase_price,purchase_date,notes=""):
+                    pos_id = hashlib.md5(f"{portfolio_id}_{symbol}_{datetime.now()}".encode()).hexdigest()
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    now = datetime.now().isoformat()
+                    c.execute('INSERT INTO positions VALUES (?,?,?,?,?,?,?,?,?)', (pos_id,portfolio_id,symbol,quantity,purchase_price,purchase_date,None,now,notes))
+                    tx_id = hashlib.md5(f"{pos_id}_buy_{datetime.now()}".encode()).hexdigest()
+                    c.execute('INSERT INTO transactions (id,portfolio_id,symbol,transaction_type,quantity,price,transaction_date,notes) VALUES (?,?,?,?,?,?,?,?)', (tx_id,portfolio_id,symbol,'BUY',quantity,purchase_price,purchase_date,notes))
+                    c.execute('UPDATE portfolios SET updated_at=? WHERE id=?', (now, portfolio_id))
+                    conn.commit(); conn.close(); return pos_id
+                def remove_position(self, portfolio_id,symbol,quantity,sell_price,sell_date,notes=""):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('SELECT id,quantity FROM positions WHERE portfolio_id=? AND symbol=?', (portfolio_id,symbol))
+                    row = c.fetchone();
+                    if not row: conn.close(); raise ValueError('No position found')
+                    pos_id, qty = row
+                    if quantity > qty: conn.close(); raise ValueError('Insufficient quantity')
+                    new_qty = qty - quantity
+                    if new_qty == 0:
+                        c.execute('DELETE FROM positions WHERE id=?', (pos_id,))
+                    else:
+                        c.execute('UPDATE positions SET quantity=?, last_updated=? WHERE id=?', (new_qty, datetime.now().isoformat(), pos_id))
+                    tx_id = hashlib.md5(f"{pos_id}_sell_{datetime.now()}".encode()).hexdigest()
+                    c.execute('INSERT INTO transactions (id,portfolio_id,symbol,transaction_type,quantity,price,transaction_date,notes) VALUES (?,?,?,?,?,?,?,?)', (tx_id,portfolio_id,symbol,'SELL',quantity,sell_price,sell_date,notes))
+                    c.execute('UPDATE portfolios SET updated_at=? WHERE id=?', (datetime.now().isoformat(), portfolio_id))
+                    conn.commit(); conn.close(); return tx_id
+                def get_positions(self, portfolio_id):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('SELECT symbol,quantity,purchase_price,purchase_date,current_price,last_updated,notes FROM positions WHERE portfolio_id=? ORDER BY symbol', (portfolio_id,))
+                    rows = c.fetchall(); conn.close()
+                    return [{'symbol':r[0],'quantity':r[1],'purchase_price':r[2],'purchase_date':r[3],'current_price':r[4],'last_updated':r[5],'notes':r[6]} for r in rows]
+                def get_transactions(self, portfolio_id):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('SELECT symbol,transaction_type,quantity,price,transaction_date,fees,notes FROM transactions WHERE portfolio_id=? ORDER BY transaction_date DESC', (portfolio_id,))
+                    rows = c.fetchall(); conn.close()
+                    return [{'symbol':r[0],'type':r[1],'quantity':r[2],'price':r[3],'date':r[4],'fees':r[5],'notes':r[6]} for r in rows]
+                def calculate_portfolio_metrics(self, portfolio_id, current_prices: dict):
+                    positions = self.get_positions(portfolio_id)
+                    total_cost=0; total_value=0; items=[]
+                    for p in positions:
+                        q=p['quantity']; cost=q*p['purchase_price']; cur=q*current_prices.get(p['symbol'], p['purchase_price'])
+                        pnl=cur-cost; pnl_pct=(pnl/cost*100) if cost>0 else 0
+                        total_cost+=cost; total_value+=cur
+                        items.append({'symbol':p['symbol'],'quantity':q,'purchase_price':p['purchase_price'],'current_price':cur/q if q else 0,'cost_basis':cost,'current_value':cur,'pnl':pnl,'pnl_percent':pnl_pct})
+                    for it in items:
+                        it['weight'] = (it['current_value']/total_value*100) if total_value>0 else 0
+                    return {'total_value':total_value,'total_cost':total_cost,'total_pnl':total_value-total_cost,'total_pnl_percent':((total_value-total_cost)/total_cost*100) if total_cost>0 else 0,'positions_count':len(items),'positions':items}
+                def update_position_prices(self, portfolio_id, current_prices: dict):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    now = datetime.now().isoformat()
+                    for sym,price in current_prices.items():
+                        c.execute('UPDATE positions SET current_price=?, last_updated=? WHERE portfolio_id=? AND symbol=?', (price, now, portfolio_id, sym))
+                    conn.commit(); conn.close()
+                def save_portfolio_performance(self, portfolio_id, metrics: dict):
+                    pid = hashlib.md5(f"{portfolio_id}_{datetime.now().date()}".encode()).hexdigest()
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('INSERT OR REPLACE INTO portfolio_performance VALUES (?,?,?,?,?,?,?,?)', (pid,portfolio_id,datetime.now().date().isoformat(),metrics['total_value'],metrics['total_cost'],metrics['total_pnl'],metrics['total_pnl_percent'],datetime.now().isoformat()))
+                    conn.commit(); conn.close()
+                def get_portfolio_performance_history(self, portfolio_id, days:int=30):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    start=(datetime.now()-timedelta(days=days)).date().isoformat()
+                    c.execute('SELECT date,total_value,total_cost,total_pnl,total_pnl_percent FROM portfolio_performance WHERE portfolio_id=? AND date>=? ORDER BY date ASC', (portfolio_id,start))
+                    rows=c.fetchall(); conn.close()
+                    return [{'date':r[0],'total_value':r[1],'total_cost':r[2],'total_pnl':r[3],'total_pnl_percent':r[4]} for r in rows]
+                def delete_portfolio(self, portfolio_id):
+                    conn = sqlite3.connect(self.db_path); c = conn.cursor()
+                    c.execute('DELETE FROM positions WHERE portfolio_id=?', (portfolio_id,))
+                    c.execute('DELETE FROM transactions WHERE portfolio_id=?', (portfolio_id,))
+                    c.execute('DELETE FROM portfolio_performance WHERE portfolio_id=?', (portfolio_id,))
+                    c.execute('DELETE FROM portfolios WHERE id=?', (portfolio_id,))
+                    conn.commit(); conn.close()
     portfolio_manager = PortfolioManager()
     
     # Sidebar controls
