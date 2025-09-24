@@ -1372,7 +1372,7 @@ def get_world_markets():
         for symbol, name in global_indices.items():
             try:
                 ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="2d", timeout=10)
+                hist = ticker.history(period="2d", timeout=5)
                 
                 if not hist.empty and len(hist) >= 2:
                     current_price = hist['Close'].iloc[-1]
@@ -1421,7 +1421,7 @@ def get_forex_data():
         for symbol, pair in forex_pairs.items():
             try:
                 ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="2d", timeout=10)
+                hist = ticker.history(period="2d", timeout=5)
                 
                 if not hist.empty and len(hist) >= 2:
                     current_price = hist['Close'].iloc[-1]
@@ -1463,15 +1463,15 @@ def get_crypto_data():
             'DOT-USD': 'Polkadot',
             'DOGE-USD': 'Dogecoin',
             'AVAX-USD': 'Avalanche',
-            'MATIC-USD': 'Polygon',
             'LTC-USD': 'Litecoin',
-            'LINK-USD': 'Chainlink'
+            'LINK-USD': 'Chainlink',
+            'UNI-USD': 'Uniswap'
         }
         
         for symbol, name in crypto_symbols.items():
             try:
                 ticker = yf.Ticker(symbol)
-                hist = ticker.history(period="2d", timeout=10)
+                hist = ticker.history(period="2d", timeout=5)
                 info = ticker.info
                 
                 if not hist.empty and len(hist) >= 2:
