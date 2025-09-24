@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Portfolio from './pages/Portfolio';
 import MarketData from './pages/MarketData';
 import GlobalMarkets from './pages/GlobalMarkets';
+import Alerts from './pages/Alerts';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -93,6 +94,7 @@ function AppContent() {
                   <Route path="/portfolio" element={<Portfolio />} />
                   <Route path="/market-data" element={<MarketData />} />
                   <Route path="/global-markets" element={<GlobalMarkets />} />
+                  <Route path="/alerts" element={<Alerts />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />
                   <Route path="/register" element={<Navigate to="/" replace />} />
                 </>
