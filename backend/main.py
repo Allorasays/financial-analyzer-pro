@@ -30,6 +30,11 @@ from schemas import UserCreate, UserResponse, PortfolioCreate, PortfolioResponse
 from auth import create_access_token, verify_token, get_current_user
 from cache_service import CacheService
 from websocket_manager import ConnectionManager
+from notification_service import NotificationService
+from real_time_service import RealTimeService
+from ai_analytics_service import AIAnalyticsService
+from sentiment_analysis_service import SentimentAnalysisService
+from advanced_analytics_service import AdvancedAnalyticsService
 from config import settings
 
 # Configure logging
@@ -57,6 +62,11 @@ app.add_middleware(
 # Initialize services
 cache_service = CacheService()
 websocket_manager = ConnectionManager()
+notification_service = NotificationService()
+real_time_service = RealTimeService()
+ai_analytics_service = AIAnalyticsService()
+sentiment_analysis_service = SentimentAnalysisService()
+advanced_analytics_service = AdvancedAnalyticsService()
 security = HTTPBearer()
 
 # Create database tables
@@ -78,6 +88,26 @@ async def startup_event():
     # Start background market data task
     market_data_task = asyncio.create_task(market_data_broadcaster())
     logger.info("Market data broadcaster started")
+    
+    # Start notification service background tasks
+    await notification_service.start_background_tasks()
+    logger.info("Notification service started")
+    
+    # Start real-time service background tasks
+    await real_time_service.start_background_tasks()
+    logger.info("Real-time service started")
+    
+    # Start AI analytics service background tasks
+    await ai_analytics_service.start_background_tasks()
+    logger.info("AI Analytics service started")
+    
+    # Start sentiment analysis service background tasks
+    await sentiment_analysis_service.start_background_tasks()
+    logger.info("Sentiment Analysis service started")
+    
+    # Start advanced analytics service background tasks
+    await advanced_analytics_service.start_background_tasks()
+    logger.info("Advanced Analytics service started")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -85,6 +115,22 @@ async def shutdown_event():
     global market_data_task
     if market_data_task:
         market_data_task.cancel()
+    
+    # Stop notification service
+    await notification_service.stop_background_tasks()
+    
+    # Stop real-time service
+    await real_time_service.stop_background_tasks()
+    
+    # Stop AI analytics service
+    await ai_analytics_service.stop_background_tasks()
+    
+    # Stop sentiment analysis service
+    await sentiment_analysis_service.stop_background_tasks()
+    
+    # Stop advanced analytics service
+    await advanced_analytics_service.stop_background_tasks()
+    
     logger.info("Financial Analyzer Pro API shutdown")
 
 # Health check endpoints
@@ -363,8 +409,24 @@ async def websocket_endpoint(websocket: WebSocket, user_id: int):
                     json.dumps({"type": "pong", "timestamp": time.time()}),
                     websocket
                 )
+            elif message.get("type") == "subscribe_symbol":
+                # Subscribe to specific symbol updates
+                symbol = message.get("symbol")
+                if symbol:
+                    await real_time_service.subscribe_to_symbol(user_id, symbol)
+            elif message.get("type") == "unsubscribe_symbol":
+                # Unsubscribe from symbol updates
+                symbol = message.get("symbol")
+                if symbol:
+                    await real_time_service.unsubscribe_from_symbol(user_id, symbol)
+            elif message.get("type") == "subscribe_portfolio":
+                # Subscribe to portfolio updates
+                await real_time_service.subscribe_to_portfolio(user_id)
+            elif message.get("type") == "unsubscribe_portfolio":
+                # Unsubscribe from portfolio updates
+                await real_time_service.unsubscribe_from_portfolio(user_id)
             elif message.get("type") == "subscribe":
-                # Subscribe to specific data streams
+                # Legacy: Subscribe to specific data streams
                 await websocket_manager.subscribe_user(user_id, message.get("symbols", []))
                 
     except WebSocketDisconnect:
@@ -448,6 +510,336 @@ async def get_global_markets():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to fetch global markets"
+        )
+
+# Notification endpoints
+@app.post("/api/alerts/price")
+async def create_price_alert(
+    symbol: str,
+    alert_type: str,
+    target_price: float,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a price alert"""
+    try:
+        success = await notification_service.create_price_alert(
+            current_user.id, symbol, alert_type, target_price, None
+        )
+        
+        if success:
+            return {"message": "Price alert created successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create price alert"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Price alert creation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create price alert"
+        )
+
+@app.post("/api/alerts/portfolio")
+async def create_portfolio_alert(
+    alert_type: str,
+    target_value: float,
+    current_user: User = Depends(get_current_user)
+):
+    """Create a portfolio alert"""
+    try:
+        success = await notification_service.create_portfolio_alert(
+            current_user.id, alert_type, target_value, None
+        )
+        
+        if success:
+            return {"message": "Portfolio alert created successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Failed to create portfolio alert"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Portfolio alert creation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to create portfolio alert"
+        )
+
+@app.get("/api/alerts")
+async def get_user_alerts(current_user: User = Depends(get_current_user)):
+    """Get all alerts for the current user"""
+    try:
+        alerts = await notification_service.get_user_alerts(current_user.id)
+        return {"alerts": alerts}
+    except Exception as e:
+        logger.error(f"Get alerts failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get alerts"
+        )
+
+@app.delete("/api/alerts/{alert_id}")
+async def delete_alert(
+    alert_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """Delete an alert"""
+    try:
+        success = await notification_service.delete_alert(current_user.id, alert_id)
+        
+        if success:
+            return {"message": "Alert deleted successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Alert not found"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Delete alert failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete alert"
+        )
+
+# Real-time service endpoints
+@app.get("/api/real-time/stats")
+async def get_real_time_stats():
+    """Get real-time service statistics"""
+    try:
+        stats = await real_time_service.get_real_time_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Get real-time stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get real-time stats"
+        )
+
+@app.post("/api/real-time/force-update/{symbol}")
+async def force_update_symbol(symbol: str):
+    """Force update for a specific symbol"""
+    try:
+        success = await real_time_service.force_update_symbol(symbol)
+        
+        if success:
+            return {"message": f"Symbol {symbol} updated successfully"}
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Failed to update symbol {symbol}"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Force update symbol failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to force update symbol"
+        )
+
+@app.get("/api/notification/stats")
+async def get_notification_stats():
+    """Get notification service statistics"""
+    try:
+        stats = await notification_service.get_notification_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Get notification stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get notification stats"
+        )
+
+# AI Analytics endpoints
+@app.get("/api/ai/predict-price/{symbol}")
+async def predict_price(symbol: str, days_ahead: int = 5):
+    """Predict future price for a symbol"""
+    try:
+        prediction = await ai_analytics_service.predict_price(symbol, days_ahead)
+        return prediction
+    except Exception as e:
+        logger.error(f"Price prediction failed for {symbol}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to predict price"
+        )
+
+@app.get("/api/ai/analyze-trend/{symbol}")
+async def analyze_trend(symbol: str):
+    """Analyze market trend for a symbol"""
+    try:
+        trend_analysis = await ai_analytics_service.analyze_trend(symbol)
+        return trend_analysis
+    except Exception as e:
+        logger.error(f"Trend analysis failed for {symbol}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze trend"
+        )
+
+@app.get("/api/ai/assess-risk/{symbol}")
+async def assess_risk(symbol: str):
+    """Assess risk level for a symbol"""
+    try:
+        risk_assessment = await ai_analytics_service.assess_risk(symbol)
+        return risk_assessment
+    except Exception as e:
+        logger.error(f"Risk assessment failed for {symbol}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to assess risk"
+        )
+
+@app.post("/api/ai/analyze-portfolio-risk")
+async def analyze_portfolio_risk(portfolio_data: dict):
+    """Analyze portfolio risk and diversification"""
+    try:
+        risk_analysis = await ai_analytics_service.analyze_portfolio_risk(portfolio_data)
+        return risk_analysis
+    except Exception as e:
+        logger.error(f"Portfolio risk analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze portfolio risk"
+        )
+
+@app.get("/api/ai/stats")
+async def get_ai_stats():
+    """Get AI analytics service statistics"""
+    try:
+        stats = await ai_analytics_service.get_ai_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Get AI stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get AI stats"
+        )
+
+# Sentiment Analysis endpoints
+@app.get("/api/sentiment/symbol/{symbol}")
+async def analyze_symbol_sentiment(symbol: str):
+    """Analyze sentiment for a specific symbol"""
+    try:
+        sentiment = await sentiment_analysis_service.analyze_symbol_sentiment(symbol)
+        return sentiment
+    except Exception as e:
+        logger.error(f"Symbol sentiment analysis failed for {symbol}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze symbol sentiment"
+        )
+
+@app.get("/api/sentiment/market")
+async def analyze_market_sentiment():
+    """Analyze overall market sentiment"""
+    try:
+        sentiment = await sentiment_analysis_service.analyze_market_sentiment()
+        return sentiment
+    except Exception as e:
+        logger.error(f"Market sentiment analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze market sentiment"
+        )
+
+@app.post("/api/sentiment/analyze-news")
+async def analyze_news_sentiment(news_text: str):
+    """Analyze sentiment of news text"""
+    try:
+        sentiment = await sentiment_analysis_service.analyze_news_sentiment(news_text)
+        return sentiment
+    except Exception as e:
+        logger.error(f"News sentiment analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze news sentiment"
+        )
+
+@app.get("/api/sentiment/stats")
+async def get_sentiment_stats():
+    """Get sentiment analysis service statistics"""
+    try:
+        stats = await sentiment_analysis_service.get_sentiment_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Get sentiment stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get sentiment stats"
+        )
+
+# Advanced Analytics endpoints
+@app.post("/api/analytics/portfolio-performance")
+async def analyze_portfolio_performance(portfolio_data: dict):
+    """Comprehensive portfolio performance analysis"""
+    try:
+        analysis = await advanced_analytics_service.analyze_portfolio_performance(portfolio_data)
+        return analysis
+    except Exception as e:
+        logger.error(f"Portfolio performance analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze portfolio performance"
+        )
+
+@app.post("/api/analytics/market-correlation")
+async def analyze_market_correlation(symbols: List[str]):
+    """Analyze correlation between symbols"""
+    try:
+        analysis = await advanced_analytics_service.analyze_market_correlation(symbols)
+        return analysis
+    except Exception as e:
+        logger.error(f"Market correlation analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze market correlation"
+        )
+
+@app.get("/api/analytics/sector-rotation")
+async def analyze_sector_rotation():
+    """Analyze sector rotation patterns"""
+    try:
+        analysis = await advanced_analytics_service.analyze_sector_rotation()
+        return analysis
+    except Exception as e:
+        logger.error(f"Sector rotation analysis failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze sector rotation"
+        )
+
+@app.get("/api/analytics/volatility-patterns/{symbol}")
+async def analyze_volatility_patterns(symbol: str):
+    """Analyze volatility patterns for a symbol"""
+    try:
+        analysis = await advanced_analytics_service.analyze_volatility_patterns(symbol)
+        return analysis
+    except Exception as e:
+        logger.error(f"Volatility patterns analysis failed for {symbol}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to analyze volatility patterns"
+        )
+
+@app.get("/api/analytics/stats")
+async def get_analytics_stats():
+    """Get advanced analytics service statistics"""
+    try:
+        stats = await advanced_analytics_service.get_analytics_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Get analytics stats failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get analytics stats"
         )
 
 if __name__ == "__main__":
