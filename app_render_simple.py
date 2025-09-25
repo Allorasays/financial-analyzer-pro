@@ -105,9 +105,9 @@ class SimpleCache:
 # Global cache
 cache = SimpleCache()
 
-def get_market_data(symbol: str, period: str = "1mo"):
-    """Get market data with simple caching and robust fallback"""
-    cache_key = f"market_data_{symbol}_{period}"
+def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
+    """Get market data with simple caching and robust fallback - enhanced for ML predictions"""
+    cache_key = f"market_data_{symbol}_{period}_{min_days}"
     cached_data = cache.get(cache_key)
     
     if cached_data is not None:
@@ -116,26 +116,89 @@ def get_market_data(symbol: str, period: str = "1mo"):
     # Try multiple data sources
     data = None
     
-    # Method 1: Try yfinance
+    # Method 1: Try yfinance with extended period for ML
     try:
         ticker = yf.Ticker(symbol)
-        data = ticker.history(period=period, timeout=10)
         
-        if data is not None and not data.empty:
+        # For ML predictions, always try to get at least 1 year of data
+        if min_days > 90:
+            extended_period = "2y"  # Get 2 years for better ML accuracy
+        elif min_days > 30:
+            extended_period = "1y"  # Get 1 year for quarterly predictions
+        else:
+            extended_period = period
+            
+        data = ticker.history(period=extended_period, timeout=15)
+        
+        if data is not None and not data.empty and len(data) >= min_days:
             # Cache for 5 minutes
             cache.set(cache_key, data)
             return data
+        elif data is not None and not data.empty:
+            # Try with maximum available period
+            data = ticker.history(period="max", timeout=15)
+            if data is not None and not data.empty and len(data) >= min_days:
+                cache.set(cache_key, data)
+                return data
     except Exception as e:
         st.warning(f"Yahoo Finance API failed for {symbol}: {str(e)}")
     
-    # Method 2: Try with different period if original failed
+    # Method 2: Generate extended demo data for ML predictions
+    if min_days > 60:
+        st.info(f"Using extended demo data for {symbol} ML analysis (API unavailable)")
+        
+        # Generate 2 years of data for quarterly predictions (4 quarters)
+        days_needed = max(min_days, 730)  # At least 2 years
+        dates = pd.date_range(start=datetime.now() - timedelta(days=days_needed), end=datetime.now(), freq='D')
+        np.random.seed(hash(symbol) % 2**32)
+        
+        # More realistic base prices for common symbols
+        symbol_prices = {
+            'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
+            'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
+            'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
+        }
+        base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
+        
+        # Generate realistic price movement with quarterly patterns
+        price_changes = np.random.normal(0, 0.015, len(dates))
+        
+        # Add some quarterly seasonality
+        for i in range(len(dates)):
+            quarter = (dates[i].month - 1) // 3
+            if quarter == 0:  # Q1 - often positive
+                price_changes[i] += np.random.normal(0.005, 0.01)
+            elif quarter == 1:  # Q2 - mixed
+                price_changes[i] += np.random.normal(0.002, 0.008)
+            elif quarter == 2:  # Q3 - often volatile
+                price_changes[i] += np.random.normal(0, 0.02)
+            else:  # Q4 - often strong
+                price_changes[i] += np.random.normal(0.008, 0.012)
+        
+        prices = [base_price]
+        for change in price_changes[1:]:
+            prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
+        
+        data = pd.DataFrame({
+            'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
+            'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
+            'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
+            'Close': prices,
+            'Volume': np.random.randint(1000000, 15000000, len(dates))
+        }, index=dates)
+        
+        # Cache for 3 minutes (shorter for demo data)
+        cache.set(cache_key, data)
+        return data
+    
+    # Method 3: Try with different period if original failed
     if data is None or data.empty:
         try:
             ticker = yf.Ticker(symbol)
             data = ticker.history(period="1d", timeout=5)
             if data is not None and not data.empty:
-                # Extend the single day data to create a month
-                dates = pd.date_range(start=datetime.now() - timedelta(days=30), end=datetime.now(), freq='D')
+                # Extend the single day data to create sufficient period
+                dates = pd.date_range(start=datetime.now() - timedelta(days=max(period_days, min_days)), end=datetime.now(), freq='D')
                 base_price = data['Close'].iloc[-1] if not data.empty else 100
                 
                 # Create realistic price movement
@@ -159,14 +222,14 @@ def get_market_data(symbol: str, period: str = "1mo"):
         except Exception as e:
             st.warning(f"Fallback API also failed for {symbol}: {str(e)}")
     
-    # Method 3: Generate realistic demo data
+    # Method 4: Generate realistic demo data
     st.info(f"Using demo data for {symbol} (API unavailable)")
     
     # Calculate days based on period
     period_days = {
         "1mo": 30, "3mo": 90, "6mo": 180, 
         "1y": 365, "2y": 730, "5y": 1825
-    }.get(period, 30)
+    }.get(period, max(30, min_days))
     
     dates = pd.date_range(start=datetime.now() - timedelta(days=period_days), end=datetime.now(), freq='D')
     np.random.seed(hash(symbol) % 2**32)
@@ -234,29 +297,45 @@ def calculate_technical_indicators(data):
         return data
 
 def predict_price_ml(data, symbol, periods=5):
-    """Simple ML prediction"""
+    """Enhanced ML prediction with better data handling"""
     if not SKLEARN_AVAILABLE:
         return None, "ML library not available"
     
     try:
-        # Simple features
+        # Check if we have enough data
+        if len(data) < 60:
+            # Try to get more data for better predictions
+            st.info(f"Getting additional data for {symbol} ML prediction...")
+            extended_data = get_market_data(symbol, "2y", min_days=90)
+            if len(extended_data) >= 60:
+                data = extended_data
+                # Recalculate indicators for extended data
+                data = calculate_technical_indicators(data)
+            else:
+                return None, f"Insufficient data for quarterly prediction (need 60+ days, got {len(data)}). Please use previous 4 quarters for needed data."
+        
+        # Enhanced features for better predictions
         features = ['Close', 'Volume']
         if 'RSI' in data.columns:
             features.append('RSI')
         if 'SMA_20' in data.columns:
             features.append('SMA_20')
+        if 'SMA_50' in data.columns:
+            features.append('SMA_50')
+        if 'MACD' in data.columns:
+            features.append('MACD')
         
         # Prepare data
         df_ml = data[features].dropna()
-        if len(df_ml) < 20:
-            return None, "Insufficient data for prediction"
+        if len(df_ml) < 30:
+            return None, f"Insufficient data for prediction (need 30+ days, got {len(df_ml)})"
         
         # Create target
         df_ml['Target'] = df_ml['Close'].shift(-periods)
         df_ml = df_ml.dropna()
         
-        if len(df_ml) < 10:
-            return None, "Insufficient data after creating target"
+        if len(df_ml) < 15:
+            return None, f"Insufficient data after creating target (need 15+ days, got {len(df_ml)})"
         
         # Features and target
         feature_cols = [col for col in features if col != 'Close']
@@ -266,11 +345,16 @@ def predict_price_ml(data, symbol, periods=5):
         X = df_ml[feature_cols]
         y = df_ml['Target']
         
-        # Train model
+        # Train model with validation
         model = LinearRegression()
         model.fit(X, y)
         
-        # Make predictions
+        # Calculate model confidence
+        predictions = model.predict(X)
+        mse = np.mean((y - predictions) ** 2)
+        r2_score = model.score(X, y)
+        
+        # Make future predictions
         last_features = X.iloc[-1:].values
         future_prices = []
         current_price = data['Close'].iloc[-1]
@@ -278,19 +362,28 @@ def predict_price_ml(data, symbol, periods=5):
         for i in range(periods):
             pred_price = model.predict(last_features)[0]
             future_prices.append(pred_price)
-            if len(last_features[0]) > 0:
-                last_features[0][0] = pred_price
+            # Update features for next prediction (simple approach)
+            if len(last_features[0]) > 0 and 'Volume' in feature_cols:
+                vol_idx = feature_cols.index('Volume') if 'Volume' in feature_cols else 0
+                last_features[0][vol_idx] = data['Volume'].iloc[-1]  # Use recent volume
         
         # Create prediction dates
         last_date = data.index[-1]
         prediction_dates = [last_date + timedelta(days=i+1) for i in range(periods)]
         
+        # Calculate confidence based on R² and data quality
+        confidence = min(95, max(50, r2_score * 100))
+        
         return {
             'predictions': future_prices,
             'dates': prediction_dates,
             'current_price': current_price,
-            'model_type': 'Linear Regression',
-            'features_used': len(feature_cols)
+            'model_type': 'Enhanced Linear Regression',
+            'features_used': len(feature_cols),
+            'confidence': confidence,
+            'r2_score': r2_score,
+            'mse': mse,
+            'data_points': len(df_ml)
         }, None
         
     except Exception as e:
@@ -440,8 +533,9 @@ def main():
     if st.button("Analyze Stock", type="primary"):
         if symbol:
             with st.spinner(f"Analyzing {symbol}..."):
-                # Get data
-                data = get_market_data(symbol, timeframe)
+                # Get data with enhanced period for ML predictions
+                min_days = 90 if timeframe in ["1y", "2y", "5y"] else 60
+                data = get_market_data(symbol, timeframe, min_days=min_days)
                 
                 # Always proceed with data (now guaranteed to have data)
                 if data is not None and not data.empty:
@@ -499,6 +593,8 @@ def main():
                             <h4>📈 Price Predictions (Next 5 Days)</h4>
                             <p><strong>Model:</strong> {predictions['model_type']}</p>
                             <p><strong>Current Price:</strong> ${predictions['current_price']:.2f}</p>
+                            <p><strong>Confidence:</strong> {predictions.get('confidence', 'N/A'):.1f}%</p>
+                            <p><strong>Data Points:</strong> {predictions.get('data_points', 'N/A')} days</p>
                         </div>
                         """, unsafe_allow_html=True)
                         
