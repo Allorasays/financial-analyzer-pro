@@ -1,0 +1,11 @@
+services:
+  # Dockerfile-based Deployment - Most Reliable
+  - type: web
+    name: financial-analyzer-pro-docker
+    env: docker
+    plan: free
+    dockerfilePath: ./Dockerfile.render
+    envVars:
+      - key: PORT
+        value: 8501
+

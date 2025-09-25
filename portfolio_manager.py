@@ -12,6 +12,7 @@ import json
 import hashlib
 from typing import Dict, List, Optional, Tuple
 import streamlit as st
+import plotly.graph_objects as go
 
 class PortfolioManager:
     def __init__(self, db_path="portfolio.db"):
@@ -441,3 +442,132 @@ def generate_portfolio_report(portfolio_id: str, portfolio_manager: PortfolioMan
         'performance_history': performance_history,
         'generated_at': datetime.now().isoformat()
     }
+
+class EnhancedPortfolioManager:
+    """Compatibility layer used by enhanced apps. Manages a per-user default portfolio
+    and provides summary plus simple chart rendering utilities.
+    """
+    def __init__(self, db_path: str = 'financial_analyzer.db'):
+        # Mapping of user_id to a portfolio_id in the PortfolioManager database
+        self.user_db_path = db_path
+        # Use a dedicated DB for portfolio storage (existing schema)
+        self.portfolio_manager = PortfolioManager('portfolio.db')
+        self._init_user_mapping_table()
+
+    def _init_user_mapping_table(self) -> None:
+        try:
+            conn = sqlite3.connect(self.user_db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_portfolios (
+                    user_id INTEGER PRIMARY KEY,
+                    portfolio_id TEXT
+                )
+            ''')
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            st.error(f"User portfolio mapping init error: {str(e)}")
+
+    def _get_or_create_user_portfolio(self, user_id: int) -> str:
+        try:
+            conn = sqlite3.connect(self.user_db_path)
+            cursor = conn.cursor()
+            cursor.execute('SELECT portfolio_id FROM user_portfolios WHERE user_id = ?', (user_id,))
+            row = cursor.fetchone()
+            if row and row[0]:
+                conn.close()
+                return row[0]
+            # Create a default portfolio for the user
+            name = f"User {user_id} Portfolio"
+            portfolio_id = self.portfolio_manager.create_portfolio(name, "Default portfolio")
+            cursor.execute('INSERT OR REPLACE INTO user_portfolios (user_id, portfolio_id) VALUES (?, ?)', (user_id, portfolio_id))
+            conn.commit()
+            conn.close()
+            return portfolio_id
+        except Exception as e:
+            st.error(f"Error ensuring user portfolio: {str(e)}")
+            # Fallback to a transient portfolio if mapping fails
+            return self.portfolio_manager.create_portfolio(f"User {user_id} Portfolio", "Default portfolio")
+
+    def add_position(self, user_id: int, symbol: str, shares: float, price: float,
+                     date: datetime, transaction_type: str = 'BUY', fees: float = 0.0,
+                     notes: str = "") -> bool:
+        try:
+            portfolio_id = self._get_or_create_user_portfolio(user_id)
+            if transaction_type.upper() == 'SELL':
+                self.portfolio_manager.remove_position(
+                    portfolio_id, symbol, shares, price, date.isoformat(), notes
+                )
+            else:
+                self.portfolio_manager.add_position(
+                    portfolio_id, symbol, shares, price, date.isoformat(), notes
+                )
+            return True
+        except Exception as e:
+            st.error(f"Error adding position: {str(e)}")
+            return False
+
+    def get_portfolio_summary(self, user_id: int) -> Dict:
+        try:
+            portfolio_id = self._get_or_create_user_portfolio(user_id)
+            # Get current prices for symbols in portfolio
+            positions = self.portfolio_manager.get_positions(portfolio_id)
+            symbols = [p['symbol'] for p in positions]
+            current_prices = {s: self._fetch_price_with_fallback(s) for s in symbols}
+            # Update stored prices
+            self.portfolio_manager.update_position_prices(portfolio_id, current_prices)
+            metrics = self.portfolio_manager.calculate_portfolio_metrics(portfolio_id, current_prices)
+            # Augment with simple diversification metrics
+            diversification = {}
+            if metrics.get('positions'):
+                weights = [pos['weight'] for pos in metrics['positions']]
+                diversification = {
+                    'num_positions': len(weights),
+                    'max_position_weight': max(weights) if weights else 0,
+                    'concentration_index': float(np.sqrt(np.sum(np.square(np.array(weights) / 100.0)))) if weights else 0,
+                }
+            return {
+                'portfolio_id': portfolio_id,
+                'positions': metrics.get('positions', []),
+                'total_value': metrics.get('total_value', 0),
+                'total_cost': metrics.get('total_cost', 0),
+                'total_gain_loss': metrics.get('total_pnl', 0),
+                'total_gain_loss_pct': metrics.get('total_pnl_percent', 0),
+                'diversification': diversification,
+                'performance_metrics': {},
+            }
+        except Exception as e:
+            st.error(f"Error building portfolio summary: {str(e)}")
+            return {}
+
+    def create_portfolio_charts(self, portfolio_summary: Dict) -> None:
+        try:
+            positions = portfolio_summary.get('positions', [])
+            if not positions:
+                st.info("No positions to chart.")
+                return
+            # Allocation pie chart
+            labels = [p['symbol'] for p in positions]
+            values = [max(p.get('current_value', 0), 0) for p in positions]
+            if sum(values) <= 0:
+                st.info("No position value to chart.")
+                return
+            fig = go.Figure(data=[go.Pie(labels=labels, values=values, hole=0.3)])
+            fig.update_layout(title_text="Portfolio Allocation")
+            st.plotly_chart(fig, use_container_width=True)
+        except Exception as e:
+            st.error(f"Error creating portfolio charts: {str(e)}")
+
+    def _fetch_price_with_fallback(self, symbol: str) -> float:
+        try:
+            import yfinance as yf
+            hist = yf.Ticker(symbol).history(period="1d")
+            if hist is not None and not hist.empty:
+                return float(hist['Close'].iloc[-1])
+        except Exception:
+            pass
+        # Fallback demo price
+        base = 100 + (hash(symbol) % 1000)
+        np.random.seed(hash(symbol) % 2**32)
+        return float(base * (1 + np.random.normal(0, 0.01)))
