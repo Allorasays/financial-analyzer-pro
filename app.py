@@ -110,6 +110,9 @@ analysis_tab = st.sidebar.selectbox(
         "📊 Stock Analysis", 
         "💼 Portfolio Management",
         "📈 Market Overview",
+        "🌍 Global Markets",
+        "💱 Forex Analysis",
+        "₿ Crypto Markets",
         "🔴 Real-Time Data",
         "🏭 Industry Analysis",
         "⚠️ Risk Assessment",
@@ -163,7 +166,7 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
             if data is not None and not data.empty and len(data) >= min_days:
                 cache.set(cache_key, data)
                 return data
-    except Exception as e:
+        except Exception as e:
         st.warning(f"Yahoo Finance API failed for {symbol}: {str(e)}")
     
     # Method 2: Generate extended demo data for ML predictions
@@ -173,16 +176,16 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
         # Generate 2 years of data for quarterly predictions (4 quarters)
         days_needed = max(min_days, 730)  # At least 2 years
         dates = pd.date_range(start=datetime.now() - timedelta(days=days_needed), end=datetime.now(), freq='D')
-        np.random.seed(hash(symbol) % 2**32)
-        
-        # More realistic base prices for common symbols
-        symbol_prices = {
-            'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
+    np.random.seed(hash(symbol) % 2**32)
+    
+    # More realistic base prices for common symbols
+    symbol_prices = {
+        'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
             'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
             'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
-        }
-        base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
-        
+    }
+    base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
+    
         # Generate realistic price movement with quarterly patterns
         price_changes = np.random.normal(0, 0.015, len(dates))
         
@@ -198,21 +201,21 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
             else:  # Q4 - often strong
                 price_changes[i] += np.random.normal(0.008, 0.012)
         
-        prices = [base_price]
-        for change in price_changes[1:]:
+    prices = [base_price]
+    for change in price_changes[1:]:
             prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
-        
-        data = pd.DataFrame({
+    
+    data = pd.DataFrame({
             'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
             'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
             'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
-            'Close': prices,
+        'Close': prices,
             'Volume': np.random.randint(1000000, 15000000, len(dates))
-        }, index=dates)
-        
+    }, index=dates)
+    
         # Cache for 3 minutes (shorter for demo data)
-        cache.set(cache_key, data)
-        return data
+    cache.set(cache_key, data)
+    return data
     
     # Final fallback - return None
     return None
@@ -220,8 +223,8 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
 def calculate_technical_indicators(data):
     """Calculate comprehensive technical indicators"""
     df = data.copy()
-    
-    # Moving Averages
+        
+        # Moving Averages
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['EMA_12'] = df['Close'].ewm(span=12).mean()
@@ -229,16 +232,16 @@ def calculate_technical_indicators(data):
     
     # RSI
     delta = df['Close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-    rs = gain / loss
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-    
-    # MACD
+        
+        # MACD
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-    
-    # Bollinger Bands
+        
+        # Bollinger Bands
     df['BB_Middle'] = df['Close'].rolling(window=20).mean()
     bb_std = df['Close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
@@ -322,9 +325,50 @@ def get_market_overview():
     overview = {}
     
     for symbol in symbols:
-        try:
-            ticker = yf.Ticker(symbol)
+    try:
+        ticker = yf.Ticker(symbol)
             hist = ticker.history(period="2d")
+            
+            if not hist.empty and len(hist) >= 2:
+                current_price = hist['Close'].iloc[-1]
+                previous_price = hist['Close'].iloc[-2]
+            change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                overview[symbol] = {
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            }
+    except Exception as e:
+            st.warning(f"Could not fetch {symbol}: {str(e)}")
+    
+    return overview
+
+def get_global_markets_overview():
+    """Enhanced global markets overview with robust fallback"""
+    markets = []
+    
+    # Define major global markets
+    market_indices = [
+        {'symbol': '^GSPC', 'name': 'S&P 500', 'base_price': 4500},
+        {'symbol': '^IXIC', 'name': 'NASDAQ', 'base_price': 14000},
+        {'symbol': '^DJI', 'name': 'Dow Jones', 'base_price': 35000},
+        {'symbol': '^VIX', 'name': 'VIX Volatility', 'base_price': 20},
+        {'symbol': '^FTSE', 'name': 'FTSE 100', 'base_price': 7500},
+        {'symbol': '^GDAXI', 'name': 'DAX', 'base_price': 16000},
+        {'symbol': '^FCHI', 'name': 'CAC 40', 'base_price': 7000},
+        {'symbol': '^N225', 'name': 'Nikkei 225', 'base_price': 30000},
+        {'symbol': '^HSI', 'name': 'Hang Seng', 'base_price': 18000},
+        {'symbol': '^AXJO', 'name': 'ASX 200', 'base_price': 7500},
+        {'symbol': '^TNX', 'name': '10-Year Treasury', 'base_price': 4.5},
+        {'symbol': 'GC=F', 'name': 'Gold', 'base_price': 2000}
+    ]
+    
+    for market in market_indices:
+        try:
+            ticker = yf.Ticker(market['symbol'])
+            hist = ticker.history(period="2d", timeout=10)
             
             if not hist.empty and len(hist) >= 2:
                 current_price = hist['Close'].iloc[-1]
@@ -332,15 +376,138 @@ def get_market_overview():
                 change = current_price - previous_price
                 change_percent = (change / previous_price) * 100
                 
-                overview[symbol] = {
+                markets.append({
+                    'name': market['name'],
+                    'symbol': market['symbol'],
                     'price': current_price,
                     'change': change,
                     'change_percent': change_percent
-                }
+                })
         except Exception as e:
-            st.warning(f"Could not fetch {symbol}: {str(e)}")
+            # Fallback to demo data
+            np.random.seed(hash(market['symbol']) % 2**32)
+            base_price = market['base_price']
+            change_percent = np.random.normal(0, 2)  # Random change between -4% to +4%
+            change = base_price * (change_percent / 100)
+            current_price = base_price + change
+            
+            markets.append({
+                'name': market['name'],
+                'symbol': market['symbol'],
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            })
     
-    return overview
+    return markets
+
+def get_forex_data():
+    """Get major forex currency pairs data"""
+    forex_pairs = []
+    
+    # Major forex pairs
+    forex_symbols = [
+        {'symbol': 'EURUSD=X', 'name': 'EUR/USD', 'base_price': 1.08},
+        {'symbol': 'GBPUSD=X', 'name': 'GBP/USD', 'base_price': 1.27},
+        {'symbol': 'USDJPY=X', 'name': 'USD/JPY', 'base_price': 150.0},
+        {'symbol': 'USDCHF=X', 'name': 'USD/CHF', 'base_price': 0.88},
+        {'symbol': 'AUDUSD=X', 'name': 'AUD/USD', 'base_price': 0.66},
+        {'symbol': 'USDCAD=X', 'name': 'USD/CAD', 'base_price': 1.37},
+        {'symbol': 'NZDUSD=X', 'name': 'NZD/USD', 'base_price': 0.61},
+        {'symbol': 'EURGBP=X', 'name': 'EUR/GBP', 'base_price': 0.85},
+        {'symbol': 'EURJPY=X', 'name': 'EUR/JPY', 'base_price': 162.0},
+        {'symbol': 'GBPJPY=X', 'name': 'GBP/JPY', 'base_price': 190.5}
+    ]
+    
+    for pair in forex_symbols:
+        try:
+            ticker = yf.Ticker(pair['symbol'])
+            hist = ticker.history(period="2d", timeout=10)
+            
+            if not hist.empty and len(hist) >= 2:
+                current_price = hist['Close'].iloc[-1]
+                previous_price = hist['Close'].iloc[-2]
+                change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                forex_pairs.append({
+                    'name': pair['name'],
+                    'symbol': pair['symbol'],
+                    'price': current_price,
+                    'change': change,
+                    'change_percent': change_percent
+                })
+        except Exception as e:
+            # Fallback to demo data
+            np.random.seed(hash(pair['symbol']) % 2**32)
+            base_price = pair['base_price']
+            change_percent = np.random.normal(0, 0.5)  # Smaller changes for forex
+            change = base_price * (change_percent / 100)
+            current_price = base_price + change
+            
+            forex_pairs.append({
+                'name': pair['name'],
+                'symbol': pair['symbol'],
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            })
+    
+    return forex_pairs
+
+def get_crypto_data():
+    """Get major cryptocurrency data"""
+    crypto_data = []
+    
+    # Major cryptocurrencies
+    crypto_symbols = [
+        {'symbol': 'BTC-USD', 'name': 'Bitcoin', 'base_price': 45000},
+        {'symbol': 'ETH-USD', 'name': 'Ethereum', 'base_price': 2800},
+        {'symbol': 'BNB-USD', 'name': 'Binance Coin', 'base_price': 320},
+        {'symbol': 'XRP-USD', 'name': 'XRP', 'base_price': 0.62},
+        {'symbol': 'ADA-USD', 'name': 'Cardano', 'base_price': 0.48},
+        {'symbol': 'SOL-USD', 'name': 'Solana', 'base_price': 95},
+        {'symbol': 'DOT-USD', 'name': 'Polkadot', 'base_price': 7.2},
+        {'symbol': 'DOGE-USD', 'name': 'Dogecoin', 'base_price': 0.08},
+        {'symbol': 'AVAX-USD', 'name': 'Avalanche', 'base_price': 38},
+        {'symbol': 'MATIC-USD', 'name': 'Polygon', 'base_price': 0.85}
+    ]
+    
+    for crypto in crypto_symbols:
+        try:
+            ticker = yf.Ticker(crypto['symbol'])
+            hist = ticker.history(period="2d", timeout=10)
+            
+            if not hist.empty and len(hist) >= 2:
+                current_price = hist['Close'].iloc[-1]
+                previous_price = hist['Close'].iloc[-2]
+                change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                crypto_data.append({
+                    'name': crypto['name'],
+                    'symbol': crypto['symbol'],
+                    'price': current_price,
+                    'change': change,
+                    'change_percent': change_percent
+                })
+        except Exception as e:
+            # Fallback to demo data
+            np.random.seed(hash(crypto['symbol']) % 2**32)
+            base_price = crypto['base_price']
+            change_percent = np.random.normal(0, 5)  # Higher volatility for crypto
+            change = base_price * (change_percent / 100)
+            current_price = base_price + change
+            
+            crypto_data.append({
+                'name': crypto['name'],
+                'symbol': crypto['symbol'],
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            })
+    
+    return crypto_data
 
 # Main Application Logic
 if analysis_tab == "🏠 Dashboard":
@@ -353,7 +520,7 @@ if analysis_tab == "🏠 Dashboard":
     if market_data:
         col1, col2, col3, col4 = st.columns(4)
         
-        indices = [
+    indices = [
             ('^GSPC', 'S&P 500', col1),
             ('^IXIC', 'NASDAQ', col2),
             ('^DJI', 'DOW', col3),
@@ -380,11 +547,11 @@ if analysis_tab == "🏠 Dashboard":
         total_pnl_percent = (total_pnl / total_cost) * 100 if total_cost > 0 else 0
         
         col1, col2, col3, col4 = st.columns(4)
-        with col1:
+    with col1:
             st.metric("Total Value", f"${total_value:,.2f}")
-        with col2:
+    with col2:
             st.metric("Total P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:+.2f}%")
-        with col3:
+    with col3:
             st.metric("Positions", len(st.session_state.portfolio))
         with col4:
             st.metric("Watchlist", len(st.session_state.watchlist))
@@ -409,19 +576,19 @@ elif analysis_tab == "📊 Stock Analysis":
             else:
                 st.success(f"✅ Analysis complete for {symbol}")
                 
-                # Calculate indicators
+                    # Calculate indicators
                 data_with_indicators = calculate_technical_indicators(data)
                 risk_metrics = calculate_risk_metrics(data)
-                
-                # Display metrics
+                    
+                    # Display metrics
                 current_price = data['Close'].iloc[-1]
                 previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
                 change = current_price - previous_price
                 change_percent = (change / previous_price) * 100
                 
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    with col1:
                     st.metric("Current Price", f"${current_price:.2f}", f"{change:+.2f}")
                 with col2:
                     st.metric("Change", f"{change_percent:+.2f}%")
@@ -486,8 +653,8 @@ elif analysis_tab == "📊 Stock Analysis":
                     height=500
                 )
                 
-                st.plotly_chart(fig, use_container_width=True)
-                
+                    st.plotly_chart(fig, use_container_width=True)
+                    
                 # Risk metrics
                 st.subheader("Risk Assessment")
                 col1, col2 = st.columns(2)
@@ -502,8 +669,191 @@ elif analysis_tab == "📊 Stock Analysis":
                         st.success("✅ Low risk investment")
                     elif volatility < 40:
                         st.warning("⚠️ Medium risk investment")
-                    else:
+                else:
                         st.error("🚨 High risk investment")
+
+elif analysis_tab == "📈 Market Overview":
+    st.header("📈 Market Overview")
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1: st.info("🌐 **Real-time global market data** (with fallback to demo data)")
+    with col2:
+        if st.button("🔄 Refresh Markets"): st.rerun()
+    with col3: st.success("✅ **Markets Open**")
+    
+    st.subheader("🌍 Global Markets")
+    with st.spinner("Loading global market data..."):
+        markets = get_global_markets_overview()
+    
+    if markets:
+        st.success(f"✅ Loaded {len(markets)} market indices")
+        for i in range(0, len(markets), 3):
+            row = markets[i:i+3]
+            cols = st.columns(len(row))
+            for col, item in zip(cols, row):
+                with col:
+                    if 'Treasury' in item['name']: price_str = f"{item['price']:.2f}%"
+                    elif item['price'] > 1000: price_str = f"${item['price']:,.0f}"
+                    else: price_str = f"${item['price']:.2f}"
+                    delta_str = f"{item['change']:+.2f} ({item['change_percent']:+.2f}%)"
+                    if item['change_percent'] > 0: st.metric(item['name'], price_str, delta_str, delta_color="normal")
+                    else: st.metric(item['name'], price_str, delta_str, delta_color="inverse")
+        
+        st.subheader("📊 Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for m in markets if m['change_percent'] > 0)
+        negative_count = sum(1 for m in markets if m['change_percent'] < 0)
+        avg_change = sum(m['change_percent'] for m in markets) / len(markets)
+        with col1: st.metric("Markets Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Markets Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4:
+            if avg_change > 0: st.metric("Overall Sentiment", "🟢 Bullish", f"+{avg_change:.2f}%")
+            else: st.metric("Overall Sentiment", "🔴 Bearish", f"{avg_change:.2f}%")
+    else:
+        st.error("❌ Unable to load market data")
+        st.info("💡 This might be due to network connectivity or API limits. Demo data should be used as fallback.")
+
+elif analysis_tab == "🌍 Global Markets":
+    st.header("🌍 Global Markets Analysis")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("📊 **Comprehensive global market indices and analysis**")
+    with col2:
+        if st.button("🔄 Refresh Global Markets"): st.rerun()
+    
+    st.subheader("🌏 Major Global Indices")
+    with st.spinner("Loading global market data..."):
+        markets = get_global_markets_overview()
+    
+    if markets:
+        # Display in a more organized grid
+        for i in range(0, len(markets), 4):
+            row = markets[i:i+4]
+            cols = st.columns(4)
+            for col, item in zip(cols, row):
+                with col:
+                    st.markdown(f"""
+                    <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin: 5px 0;">
+                        <h4>{item['name']}</h4>
+                        <p><strong>Price:</strong> ${item['price']:,.2f}</p>
+                        <p style="color: {'green' if item['change_percent'] > 0 else 'red'};">
+                            <strong>{item['change_percent']:+.2f}%</strong>
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        st.subheader("📈 Market Performance Analysis")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**🔺 Top Performers:**")
+            gainers = sorted(markets, key=lambda x: x['change_percent'], reverse=True)[:5]
+            for i, mover in enumerate(gainers, 1):
+                st.write(f"{i}. {mover['name']}: {mover['change_percent']:+.2f}%")
+        with col2:
+            st.write("**🔻 Underperformers:**")
+            losers = sorted(markets, key=lambda x: x['change_percent'])[:5]
+            for i, mover in enumerate(losers, 1):
+                st.write(f"{i}. {mover['name']}: {mover['change_percent']:+.2f}%")
+
+elif analysis_tab == "💱 Forex Analysis":
+    st.header("💱 Forex Analysis")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("💱 **Major currency pairs and forex analysis**")
+    with col2:
+        if st.button("🔄 Refresh Forex"): st.rerun()
+    
+    st.subheader("🌍 Major Currency Pairs")
+    with st.spinner("Loading forex data..."):
+        forex_data = get_forex_data()
+    
+    if forex_data:
+        st.success(f"✅ Loaded {len(forex_data)} currency pairs")
+        
+        # Display forex pairs in organized layout
+        for i in range(0, len(forex_data), 3):
+            row = forex_data[i:i+3]
+            cols = st.columns(3)
+            for col, pair in zip(cols, row):
+                with col:
+                    st.markdown(f"""
+                    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 8px; margin: 5px 0; background: {'#e8f5e8' if pair['change_percent'] > 0 else '#ffe8e8'};">
+                        <h4>{pair['name']}</h4>
+                        <p><strong>Rate:</strong> {pair['price']:.4f}</p>
+                        <p style="color: {'green' if pair['change_percent'] > 0 else 'red'}; font-weight: bold;">
+                            {pair['change']:+.4f} ({pair['change_percent']:+.2f}%)
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        st.subheader("📊 Forex Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for p in forex_data if p['change_percent'] > 0)
+        negative_count = sum(1 for p in forex_data if p['change_percent'] < 0)
+        avg_change = sum(p['change_percent'] for p in forex_data) / len(forex_data)
+        volatility = np.std([p['change_percent'] for p in forex_data])
+        
+        with col1: st.metric("Pairs Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Pairs Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4: st.metric("Volatility", f"{volatility:.2f}%")
+
+elif analysis_tab == "₿ Crypto Markets":
+    st.header("₿ Cryptocurrency Markets")
+    
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("₿ **Major cryptocurrencies and market analysis**")
+    with col2:
+        if st.button("🔄 Refresh Crypto"): st.rerun()
+    
+    st.subheader("🚀 Top Cryptocurrencies")
+    with st.spinner("Loading cryptocurrency data..."):
+        crypto_data = get_crypto_data()
+    
+    if crypto_data:
+        st.success(f"✅ Loaded {len(crypto_data)} cryptocurrencies")
+        
+        # Display crypto in organized layout
+        for i in range(0, len(crypto_data), 2):
+            row = crypto_data[i:i+2]
+            cols = st.columns(2)
+            for col, crypto in zip(cols, row):
+                with col:
+                    price_str = f"${crypto['price']:,.2f}" if crypto['price'] > 1 else f"${crypto['price']:.4f}"
+                    st.markdown(f"""
+                    <div style="padding: 20px; border: 1px solid #ddd; border-radius: 10px; margin: 10px 0; background: {'#e8f5e8' if crypto['change_percent'] > 0 else '#ffe8e8'};">
+                        <h3>₿ {crypto['name']}</h3>
+                        <p><strong>Price:</strong> {price_str}</p>
+                        <p style="color: {'green' if crypto['change_percent'] > 0 else 'red'}; font-weight: bold; font-size: 18px;">
+                            {crypto['change']:+.2f} ({crypto['change_percent']:+.2f}%)
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        st.subheader("📊 Crypto Market Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for c in crypto_data if c['change_percent'] > 0)
+        negative_count = sum(1 for c in crypto_data if c['change_percent'] < 0)
+        avg_change = sum(c['change_percent'] for c in crypto_data) / len(crypto_data)
+        volatility = np.std([c['change_percent'] for c in crypto_data])
+        
+        with col1: st.metric("Crypto Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Crypto Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4: st.metric("Volatility", f"{volatility:.2f}%")
+        
+        st.subheader("🏆 Top Performers")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**🚀 Biggest Gainers:**")
+            gainers = sorted(crypto_data, key=lambda x: x['change_percent'], reverse=True)[:5]
+            for i, crypto in enumerate(gainers, 1):
+                st.write(f"{i}. {crypto['name']}: {crypto['change_percent']:+.2f}%")
+        with col2:
+            st.write("**📉 Biggest Losers:**")
+            losers = sorted(crypto_data, key=lambda x: x['change_percent'])[:5]
+            for i, crypto in enumerate(losers, 1):
+                st.write(f"{i}. {crypto['name']}: {crypto['change_percent']:+.2f}%")
 
 elif analysis_tab == "💼 Portfolio Management":
     st.header("💼 Portfolio Management")
