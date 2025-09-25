@@ -300,3 +300,4 @@ const GlobalMarkets: React.FC = () => {
 };
 
 export default GlobalMarkets;
+

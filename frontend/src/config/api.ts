@@ -26,3 +26,4 @@ export const WEBSOCKET_MESSAGE_TYPES = {
   SUBSCRIBE: 'subscribe',
   SUBSCRIPTION_CONFIRMED: 'subscription_confirmed',
 };
+

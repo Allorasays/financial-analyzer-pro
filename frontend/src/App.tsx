@@ -8,6 +8,10 @@ import Portfolio from './pages/Portfolio';
 import MarketData from './pages/MarketData';
 import GlobalMarkets from './pages/GlobalMarkets';
 import Alerts from './pages/Alerts';
+import AIAnalytics from './pages/AIAnalytics';
+import SentimentAnalysis from './pages/SentimentAnalysis';
+import PortfolioAnalytics from './pages/PortfolioAnalytics';
+import MarketIntelligence from './pages/MarketIntelligence';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
@@ -95,6 +99,10 @@ function AppContent() {
                   <Route path="/market-data" element={<MarketData />} />
                   <Route path="/global-markets" element={<GlobalMarkets />} />
                   <Route path="/alerts" element={<Alerts />} />
+                  <Route path="/ai-analytics" element={<AIAnalytics />} />
+                  <Route path="/sentiment-analysis" element={<SentimentAnalysis />} />
+                  <Route path="/portfolio-analytics" element={<PortfolioAnalytics />} />
+                  <Route path="/market-intelligence" element={<MarketIntelligence />} />
                   <Route path="/login" element={<Navigate to="/" replace />} />
                   <Route path="/register" element={<Navigate to="/" replace />} />
                 </>

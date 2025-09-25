@@ -438,3 +438,4 @@ const MarketData: React.FC = () => {
 };
 
 export default MarketData;
+
