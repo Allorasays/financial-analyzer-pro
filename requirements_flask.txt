@@ -14,3 +14,7 @@ flask
 
 
 
+<<<<<<< Updated upstream
+=======
+
+>>>>>>> Stashed changes
