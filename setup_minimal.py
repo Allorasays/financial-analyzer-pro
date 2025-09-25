@@ -29,7 +29,3 @@ setup(
 
 
 
-<<<<<<< Updated upstream
-=======
-
->>>>>>> Stashed changes
