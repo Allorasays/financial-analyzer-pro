@@ -28,13 +28,31 @@ except ImportError as e:
 
 # Enhanced ML imports with graceful fallbacks
 try:
-    from enhanced_ml_service import enhanced_ml_service
-    from enhanced_ml_dashboard import enhanced_ml_dashboard
-    from sentiment_analysis_service import sentiment_service
-    ENHANCED_ML_AVAILABLE = True
-except ImportError as e:
-    st.warning(f"Enhanced ML features not available: {str(e)}")
-    ENHANCED_ML_AVAILABLE = False
+    from textblob import TextBlob
+    TEXTBLOB_AVAILABLE = True
+except ImportError:
+    TEXTBLOB_AVAILABLE = False
+
+try:
+    from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+    VADER_AVAILABLE = True
+except ImportError:
+    VADER_AVAILABLE = False
+
+try:
+    import nltk
+    NLTK_AVAILABLE = True
+except ImportError:
+    NLTK_AVAILABLE = False
+
+try:
+    from transformers import pipeline
+    TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    TRANSFORMERS_AVAILABLE = False
+
+# Check if any enhanced ML features are available
+ENHANCED_ML_AVAILABLE = any([TEXTBLOB_AVAILABLE, VADER_AVAILABLE, NLTK_AVAILABLE, TRANSFORMERS_AVAILABLE])
 
 # Enhanced ML imports
 try:
@@ -509,6 +527,69 @@ def get_crypto_data():
     
     return crypto_data
 
+def analyze_sentiment(text):
+    """Analyze sentiment using available libraries"""
+    sentiment_results = {}
+    
+    if TEXTBLOB_AVAILABLE:
+        try:
+            blob = TextBlob(text)
+            sentiment_results['textblob'] = {
+                'polarity': blob.sentiment.polarity,
+                'subjectivity': blob.sentiment.subjectivity,
+                'label': 'Positive' if blob.sentiment.polarity > 0 else 'Negative' if blob.sentiment.polarity < 0 else 'Neutral'
+            }
+        except Exception as e:
+            sentiment_results['textblob'] = {'error': str(e)}
+    
+    if VADER_AVAILABLE:
+        try:
+            analyzer = SentimentIntensityAnalyzer()
+            scores = analyzer.polarity_scores(text)
+            sentiment_results['vader'] = {
+                'compound': scores['compound'],
+                'positive': scores['pos'],
+                'negative': scores['neg'],
+                'neutral': scores['neu'],
+                'label': 'Positive' if scores['compound'] > 0.05 else 'Negative' if scores['compound'] < -0.05 else 'Neutral'
+            }
+        except Exception as e:
+            sentiment_results['vader'] = {'error': str(e)}
+    
+    return sentiment_results
+
+def enhanced_ml_analysis(data, symbol):
+    """Perform enhanced ML analysis with available libraries"""
+    results = {
+        'basic_analysis': {},
+        'sentiment_analysis': {},
+        'advanced_metrics': {}
+    }
+    
+    # Basic analysis
+    if not data.empty:
+        results['basic_analysis'] = {
+            'current_price': data['Close'].iloc[-1],
+            'volatility': data['Close'].pct_change().std() * 100,
+            'trend': 'Up' if data['Close'].iloc[-1] > data['Close'].iloc[-5] else 'Down',
+            'volume_avg': data['Volume'].mean()
+        }
+    
+    # Sentiment analysis on symbol name and description
+    symbol_description = f"Analysis of {symbol} stock performance and market trends"
+    results['sentiment_analysis'] = analyze_sentiment(symbol_description)
+    
+    # Advanced metrics
+    if len(data) > 20:
+        returns = data['Close'].pct_change().dropna()
+        results['advanced_metrics'] = {
+            'sharpe_ratio': returns.mean() / returns.std() * np.sqrt(252) if returns.std() > 0 else 0,
+            'max_drawdown': (data['Close'] / data['Close'].cummax() - 1).min() * 100,
+            'volatility_annualized': returns.std() * np.sqrt(252) * 100
+        }
+    
+    return results
+
 # Main Application Logic
 if analysis_tab == "🏠 Dashboard":
     st.header("🏠 Financial Dashboard")
@@ -581,7 +662,7 @@ elif analysis_tab == "📊 Stock Analysis":
                 risk_metrics = calculate_risk_metrics(data)
                     
                     # Display metrics
-                current_price = data['Close'].iloc[-1]
+                    current_price = data['Close'].iloc[-1]
                 previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
                 change = current_price - previous_price
                 change_percent = (change / previous_price) * 100
@@ -590,11 +671,11 @@ elif analysis_tab == "📊 Stock Analysis":
                     
                     with col1:
                     st.metric("Current Price", f"${current_price:.2f}", f"{change:+.2f}")
-                with col2:
+                    with col2:
                     st.metric("Change", f"{change_percent:+.2f}%")
-                with col3:
+                    with col3:
                     st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
-                with col4:
+                    with col4:
                     st.metric("Volatility", risk_metrics['Volatility (Annualized)'])
                 
                 # Price chart with indicators
@@ -739,9 +820,9 @@ elif analysis_tab == "🌍 Global Markets":
                         <p style="color: {'green' if item['change_percent'] > 0 else 'red'};">
                             <strong>{item['change_percent']:+.2f}%</strong>
                         </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
+    </div>
+    """, unsafe_allow_html=True)
+    
         st.subheader("📈 Market Performance Analysis")
         col1, col2 = st.columns(2)
         with col1:
@@ -783,9 +864,9 @@ elif analysis_tab == "💱 Forex Analysis":
                         <p style="color: {'green' if pair['change_percent'] > 0 else 'red'}; font-weight: bold;">
                             {pair['change']:+.4f} ({pair['change_percent']:+.2f}%)
                         </p>
-                    </div>
-                    """, unsafe_allow_html=True)
-        
+    </div>
+    """, unsafe_allow_html=True)
+    
         st.subheader("📊 Forex Market Summary")
         col1, col2, col3, col4 = st.columns(4)
         positive_count = sum(1 for p in forex_data if p['change_percent'] > 0)
@@ -844,12 +925,12 @@ elif analysis_tab == "₿ Crypto Markets":
         
         st.subheader("🏆 Top Performers")
         col1, col2 = st.columns(2)
-        with col1:
+    with col1:
             st.write("**🚀 Biggest Gainers:**")
             gainers = sorted(crypto_data, key=lambda x: x['change_percent'], reverse=True)[:5]
             for i, crypto in enumerate(gainers, 1):
                 st.write(f"{i}. {crypto['name']}: {crypto['change_percent']:+.2f}%")
-        with col2:
+    with col2:
             st.write("**📉 Biggest Losers:**")
             losers = sorted(crypto_data, key=lambda x: x['change_percent'])[:5]
             for i, crypto in enumerate(losers, 1):
@@ -961,7 +1042,7 @@ elif analysis_tab == "🔴 Real-Time Data":
             if st.button("🔄 Refresh All"):
                 st.cache_data.clear()
                 st.rerun()
-        with col3:
+    with col3:
             if st.button("⏸️ Stop Real-Time"):
                 stop_real_time_mode()
                 st.rerun()
@@ -1002,29 +1083,32 @@ elif analysis_tab == "🔴 Real-Time Data":
 elif analysis_tab == "🤖 Enhanced ML":
     st.header("🤖 Enhanced Machine Learning Analysis")
     
+    # Show available libraries status
+    col1, col2, col3, col4 = st.columns(4)
+    with col1: st.metric("TextBlob", "✅ Available" if TEXTBLOB_AVAILABLE else "❌ Missing")
+    with col2: st.metric("VADER", "✅ Available" if VADER_AVAILABLE else "❌ Missing")
+    with col3: st.metric("NLTK", "✅ Available" if NLTK_AVAILABLE else "❌ Missing")
+    with col4: st.metric("Transformers", "✅ Available" if TRANSFORMERS_AVAILABLE else "❌ Missing")
+    
     if not ENHANCED_ML_AVAILABLE:
-        st.error("❌ Enhanced ML features are not available. Some dependencies may be missing.")
-        st.info("💡 The app will work with basic ML features. Enhanced ML requires additional setup.")
+        st.error("❌ No enhanced ML libraries available. Please install textblob, vaderSentiment, nltk, or transformers.")
+        st.info("💡 Install missing dependencies: `pip install textblob vaderSentiment nltk transformers`")
         
         # Fallback to basic ML analysis
+        st.subheader("📊 Basic ML Analysis (Fallback)")
         col1, col2 = st.columns([1, 3])
-        with col1:
+    with col1:
             symbol = st.text_input("Stock Symbol", value="AAPL")
-        with col2:
+    with col2:
             period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
         
         if st.button("🚀 Run Basic ML Analysis", type="primary"):
             with st.spinner("Running basic machine learning analysis..."):
-                data, error = get_market_data(symbol, period)
+                min_days = 90 if period in ["1y", "2y", "5y"] else 60
+                data = get_market_data(symbol, period, min_days=min_days)
                 
-                if error:
-                    st.error(f"❌ {error}")
-                else:
+                if data is not None and not data.empty:
                     st.success(f"✅ Basic ML analysis complete for {symbol}")
-                    
-                    # Use the original ML analysis from the main app
-                    st.subheader("📊 Basic ML Analysis")
-                    st.info("This is a simplified ML analysis. For advanced features, ensure all dependencies are installed.")
                     
                     # Basic technical indicators
                     data_with_indicators = calculate_technical_indicators(data)
@@ -1045,6 +1129,8 @@ elif analysis_tab == "🤖 Enhanced ML":
                         st.metric("Change %", f"{change_percent:+.2f}%")
                     with col4:
                         st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
+                else:
+                    st.error(f"❌ No data available for {symbol}")
     else:
         col1, col2 = st.columns([1, 3])
         with col1:
@@ -1054,15 +1140,86 @@ elif analysis_tab == "🤖 Enhanced ML":
         
         if st.button("🚀 Run Enhanced ML Analysis", type="primary"):
             with st.spinner("Running enhanced machine learning analysis..."):
-                data, error = get_market_data(symbol, period)
+                min_days = 90 if period in ["1y", "2y", "5y"] else 60
+                data = get_market_data(symbol, period, min_days=min_days)
                 
-                if error:
-                    st.error(f"❌ {error}")
-                else:
+                if data is not None and not data.empty:
                     st.success(f"✅ Enhanced ML analysis complete for {symbol}")
                     
-                    # Display enhanced ML dashboard
-                    enhanced_ml_dashboard.display_ml_analysis_dashboard(symbol, data, period)
+                    # Perform enhanced ML analysis
+                    analysis_results = enhanced_ml_analysis(data, symbol)
+                    
+                    # Display results
+                    st.subheader("📊 Enhanced ML Analysis Results")
+                    
+                    # Basic Analysis
+                    if analysis_results['basic_analysis']:
+                        st.subheader("📈 Basic Analysis")
+                        basic = analysis_results['basic_analysis']
+                    col1, col2, col3, col4 = st.columns(4)
+                        with col1: st.metric("Current Price", f"${basic['current_price']:.2f}")
+                        with col2: st.metric("Volatility", f"{basic['volatility']:.2f}%")
+                        with col3: st.metric("Trend", basic['trend'])
+                        with col4: st.metric("Avg Volume", f"{basic['volume_avg']:,.0f}")
+                    
+                    # Sentiment Analysis
+                    if analysis_results['sentiment_analysis']:
+                        st.subheader("😊 Sentiment Analysis")
+                        sentiment = analysis_results['sentiment_analysis']
+                        
+                        if 'textblob' in sentiment and 'error' not in sentiment['textblob']:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("TextBlob Polarity", f"{sentiment['textblob']['polarity']:.3f}")
+                    with col2:
+                                st.metric("TextBlob Subjectivity", f"{sentiment['textblob']['subjectivity']:.3f}")
+                            with col3:
+                                st.metric("TextBlob Label", sentiment['textblob']['label'])
+                        
+                        if 'vader' in sentiment and 'error' not in sentiment['vader']:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("VADER Compound", f"{sentiment['vader']['compound']:.3f}")
+                            with col2:
+                                st.metric("VADER Positive", f"{sentiment['vader']['positive']:.3f}")
+                    with col3:
+                                st.metric("VADER Label", sentiment['vader']['label'])
+                    
+                    # Advanced Metrics
+                    if analysis_results['advanced_metrics']:
+                        st.subheader("📊 Advanced Metrics")
+                        advanced = analysis_results['advanced_metrics']
+                        col1, col2, col3 = st.columns(3)
+                        with col1: st.metric("Sharpe Ratio", f"{advanced['sharpe_ratio']:.3f}")
+                        with col2: st.metric("Max Drawdown", f"{advanced['max_drawdown']:.2f}%")
+                        with col3: st.metric("Annualized Volatility", f"{advanced['volatility_annualized']:.2f}%")
+                    
+                    # Enhanced ML Predictions
+                    st.subheader("🤖 Enhanced ML Predictions")
+                    predictions, error = predict_price_ml(data, symbol, periods=5)
+                    
+                    if predictions:
+                        st.markdown(f"""
+                        <div class="prediction-card">
+                            <h4>📈 Enhanced Price Predictions (Next 5 Days)</h4>
+                            <p><strong>Model:</strong> {predictions['model_type']}</p>
+                            <p><strong>Current Price:</strong> ${predictions['current_price']:.2f}</p>
+                            <p><strong>Confidence:</strong> {predictions.get('confidence', 'N/A'):.1f}%</p>
+                            <p><strong>Data Points:</strong> {predictions.get('data_points', 'N/A')} days</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        pred_df = pd.DataFrame({
+                            'Date': predictions['dates'],
+                            'Predicted Price': [f"${p:.2f}" for p in predictions['predictions']],
+                            'Change from Current': [f"{((p - predictions['current_price']) / predictions['current_price'] * 100):+.2f}%" 
+                                                  for p in predictions['predictions']]
+                        })
+                        st.dataframe(pred_df, use_container_width=True)
+                    else:
+                        st.error(f"Enhanced prediction failed: {error}")
+                else:
+                    st.error(f"❌ No data available for {symbol}")
 
 elif analysis_tab == "📤 Export & Reports":
     st.header("📤 Export & Reports")
