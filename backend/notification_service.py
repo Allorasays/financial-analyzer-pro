@@ -399,3 +399,4 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Failed to get notification stats: {e}")
             return {"error": str(e)}
+

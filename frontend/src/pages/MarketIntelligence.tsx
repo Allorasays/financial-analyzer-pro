@@ -566,3 +566,4 @@ const MarketIntelligence: React.FC = () => {
 
 export default MarketIntelligence;
 
+

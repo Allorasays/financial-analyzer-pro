@@ -10,6 +10,34 @@ import json
 import warnings
 warnings.filterwarnings('ignore')
 
+# Simple cache implementation
+class SimpleCache:
+    def __init__(self):
+        self.cache = {}
+        self.timestamps = {}
+        self.default_ttl = 300  # 5 minutes
+    
+    def get(self, key):
+        if key in self.cache and key in self.timestamps:
+            if (datetime.now() - self.timestamps[key]).seconds < self.default_ttl:
+                return self.cache[key]
+            else:
+                # Remove expired cache
+                self.cache.pop(key, None)
+                self.timestamps.pop(key, None)
+        return None
+    
+    def set(self, key, value):
+        self.cache[key] = value
+        self.timestamps[key] = datetime.now()
+    
+    def clear(self):
+        self.cache.clear()
+        self.timestamps.clear()
+
+# Initialize cache
+cache = SimpleCache()
+
 # Real-time data imports with graceful fallbacks
 try:
     from realtime_data_service import realtime_service, get_cached_market_overview, get_cached_live_price, get_cached_stock_data
@@ -184,7 +212,7 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
             if data is not None and not data.empty and len(data) >= min_days:
                 cache.set(cache_key, data)
                 return data
-        except Exception as e:
+    except Exception as e:
         st.warning(f"Yahoo Finance API failed for {symbol}: {str(e)}")
     
     # Method 2: Generate extended demo data for ML predictions
@@ -194,44 +222,44 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
         # Generate 2 years of data for quarterly predictions (4 quarters)
         days_needed = max(min_days, 730)  # At least 2 years
         dates = pd.date_range(start=datetime.now() - timedelta(days=days_needed), end=datetime.now(), freq='D')
-    np.random.seed(hash(symbol) % 2**32)
+        np.random.seed(hash(symbol) % 2**32)
     
     # More realistic base prices for common symbols
     symbol_prices = {
         'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
-            'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
-            'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
+        'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
+        'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
     }
     base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
     
-        # Generate realistic price movement with quarterly patterns
-        price_changes = np.random.normal(0, 0.015, len(dates))
-        
-        # Add some quarterly seasonality
-        for i in range(len(dates)):
-            quarter = (dates[i].month - 1) // 3
-            if quarter == 0:  # Q1 - often positive
-                price_changes[i] += np.random.normal(0.005, 0.01)
-            elif quarter == 1:  # Q2 - mixed
-                price_changes[i] += np.random.normal(0.002, 0.008)
-            elif quarter == 2:  # Q3 - often volatile
-                price_changes[i] += np.random.normal(0, 0.02)
-            else:  # Q4 - often strong
-                price_changes[i] += np.random.normal(0.008, 0.012)
+    # Generate realistic price movement with quarterly patterns
+    price_changes = np.random.normal(0, 0.015, len(dates))
+    
+    # Add some quarterly seasonality
+    for i in range(len(dates)):
+        quarter = (dates[i].month - 1) // 3
+        if quarter == 0:  # Q1 - often positive
+            price_changes[i] += np.random.normal(0.005, 0.01)
+        elif quarter == 1:  # Q2 - mixed
+            price_changes[i] += np.random.normal(0.002, 0.008)
+        elif quarter == 2:  # Q3 - often volatile
+            price_changes[i] += np.random.normal(0, 0.02)
+        else:  # Q4 - often strong
+            price_changes[i] += np.random.normal(0.008, 0.012)
         
     prices = [base_price]
     for change in price_changes[1:]:
-            prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
+        prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
     
     data = pd.DataFrame({
-            'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
-            'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
-            'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
+        'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
+        'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
+        'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
         'Close': prices,
-            'Volume': np.random.randint(1000000, 15000000, len(dates))
+        'Volume': np.random.randint(1000000, 15000000, len(dates))
     }, index=dates)
     
-        # Cache for 3 minutes (shorter for demo data)
+    # Cache for 3 minutes (shorter for demo data)
     cache.set(cache_key, data)
     return data
     
@@ -241,8 +269,8 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
 def calculate_technical_indicators(data):
     """Calculate comprehensive technical indicators"""
     df = data.copy()
-        
-        # Moving Averages
+    
+    # Moving Averages
     df['SMA_20'] = df['Close'].rolling(window=20).mean()
     df['SMA_50'] = df['Close'].rolling(window=50).mean()
     df['EMA_12'] = df['Close'].ewm(span=12).mean()
@@ -250,16 +278,16 @@ def calculate_technical_indicators(data):
     
     # RSI
     delta = df['Close'].diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
+    gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+    rs = gain / loss
     df['RSI'] = 100 - (100 / (1 + rs))
-        
-        # MACD
+    
+    # MACD
     df['MACD'] = df['EMA_12'] - df['EMA_26']
     df['MACD_Signal'] = df['MACD'].ewm(span=9).mean()
-        
-        # Bollinger Bands
+    
+    # Bollinger Bands
     df['BB_Middle'] = df['Close'].rolling(window=20).mean()
     bb_std = df['Close'].rolling(window=20).std()
     df['BB_Upper'] = df['BB_Middle'] + (bb_std * 2)
@@ -343,22 +371,22 @@ def get_market_overview():
     overview = {}
     
     for symbol in symbols:
-    try:
-        ticker = yf.Ticker(symbol)
+        try:
+            ticker = yf.Ticker(symbol)
             hist = ticker.history(period="2d")
             
             if not hist.empty and len(hist) >= 2:
                 current_price = hist['Close'].iloc[-1]
                 previous_price = hist['Close'].iloc[-2]
-            change = current_price - previous_price
+                change = current_price - previous_price
                 change_percent = (change / previous_price) * 100
                 
                 overview[symbol] = {
-                'price': current_price,
-                'change': change,
-                'change_percent': change_percent
-            }
-    except Exception as e:
+                    'price': current_price,
+                    'change': change,
+                    'change_percent': change_percent
+                }
+        except Exception as e:
             st.warning(f"Could not fetch {symbol}: {str(e)}")
     
     return overview
@@ -590,6 +618,103 @@ def enhanced_ml_analysis(data, symbol):
     
     return results
 
+def predict_price_ml(data, symbol, periods=5):
+    """Predict future prices using machine learning"""
+    if not SKLEARN_AVAILABLE or data is None or data.empty or len(data) < 30:
+        return None, "Insufficient data or ML library not available"
+    
+    try:
+        # Prepare features
+        df = data.copy()
+        
+        # Technical indicators
+        df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        df['SMA_10'] = df['Close'].rolling(window=10).mean()
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['RSI'] = calculate_rsi(df['Close'])
+        df['Volume_MA'] = df['Volume'].rolling(window=10).mean()
+        
+        # Price features
+        df['Price_Change'] = df['Close'].pct_change()
+        df['High_Low_Ratio'] = df['High'] / df['Low']
+        df['Volume_Price_Trend'] = df['Volume'] * df['Price_Change']
+        
+        # Remove NaN values
+        df = df.dropna()
+        
+        if len(df) < 20:
+            return None, "Insufficient data after feature engineering"
+        
+        # Prepare training data
+        features = ['SMA_5', 'SMA_10', 'SMA_20', 'RSI', 'Volume_MA', 
+                   'Price_Change', 'High_Low_Ratio', 'Volume_Price_Trend']
+        X = df[features].values
+        y = df['Close'].values
+        
+        # Use last 80% for training, 20% for validation
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Train model
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train_scaled, y_train)
+        
+        # Make predictions
+        last_features = X[-1:].reshape(1, -1)
+        last_features_scaled = scaler.transform(last_features)
+        
+        predictions = []
+        current_features = last_features_scaled.copy()
+        
+        for _ in range(periods):
+            pred_price = model.predict(current_features)[0]
+            predictions.append(pred_price)
+            
+            # Update features for next prediction (simplified)
+            new_features = current_features.copy()
+            new_features[0, 0] = pred_price  # Update SMA_5
+            new_features[0, 1] = (new_features[0, 0] + current_features[0, 0]) / 2  # Update SMA_10
+            new_features[0, 2] = (new_features[0, 1] + current_features[0, 1]) / 2  # Update SMA_20
+            new_features[0, 5] = (pred_price - current_features[0, 0]) / current_features[0, 0]  # Price change
+            
+            current_features = new_features
+        
+        # Generate dates
+        last_date = data.index[-1]
+        dates = [last_date + timedelta(days=i+1) for i in range(periods)]
+        
+        # Calculate confidence (based on model performance)
+        y_pred_test = model.predict(X_test_scaled)
+        mse = mean_squared_error(y_test, y_pred_test)
+        confidence = max(0, min(100, 100 - (mse / y_test.mean() * 100)))
+        
+        return {
+            'predictions': predictions,
+            'dates': dates,
+            'current_price': data['Close'].iloc[-1],
+            'model_type': 'Random Forest',
+            'confidence': confidence,
+            'data_points': len(df)
+        }, None
+        
+    except Exception as e:
+        return None, f"Error in ML prediction: {str(e)}"
+
+def calculate_rsi(prices, window=14):
+    """Calculate RSI indicator"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 # Main Application Logic
 if analysis_tab == "🏠 Dashboard":
     st.header("🏠 Financial Dashboard")
@@ -601,7 +726,7 @@ if analysis_tab == "🏠 Dashboard":
     if market_data:
         col1, col2, col3, col4 = st.columns(4)
         
-    indices = [
+        indices = [
             ('^GSPC', 'S&P 500', col1),
             ('^IXIC', 'NASDAQ', col2),
             ('^DJI', 'DOW', col3),
@@ -628,11 +753,11 @@ if analysis_tab == "🏠 Dashboard":
         total_pnl_percent = (total_pnl / total_cost) * 100 if total_cost > 0 else 0
         
         col1, col2, col3, col4 = st.columns(4)
-    with col1:
+        with col1:
             st.metric("Total Value", f"${total_value:,.2f}")
-    with col2:
+        with col2:
             st.metric("Total P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:+.2f}%")
-    with col3:
+        with col3:
             st.metric("Positions", len(st.session_state.portfolio))
         with col4:
             st.metric("Watchlist", len(st.session_state.watchlist))
@@ -657,25 +782,25 @@ elif analysis_tab == "📊 Stock Analysis":
             else:
                 st.success(f"✅ Analysis complete for {symbol}")
                 
-                    # Calculate indicators
+                # Calculate indicators
                 data_with_indicators = calculate_technical_indicators(data)
                 risk_metrics = calculate_risk_metrics(data)
-                    
-                    # Display metrics
-                    current_price = data['Close'].iloc[-1]
+                
+                # Display metrics
+                current_price = data['Close'].iloc[-1]
                 previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
                 change = current_price - previous_price
                 change_percent = (change / previous_price) * 100
                 
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
                     st.metric("Current Price", f"${current_price:.2f}", f"{change:+.2f}")
-                    with col2:
+                with col2:
                     st.metric("Change", f"{change_percent:+.2f}%")
-                    with col3:
+                with col3:
                     st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
-                    with col4:
+                with col4:
                     st.metric("Volatility", risk_metrics['Volatility (Annualized)'])
                 
                 # Price chart with indicators
@@ -734,8 +859,8 @@ elif analysis_tab == "📊 Stock Analysis":
                     height=500
                 )
                 
-                    st.plotly_chart(fig, use_container_width=True)
-                    
+                st.plotly_chart(fig, use_container_width=True)
+                
                 # Risk metrics
                 st.subheader("Risk Assessment")
                 col1, col2 = st.columns(2)
@@ -750,16 +875,19 @@ elif analysis_tab == "📊 Stock Analysis":
                         st.success("✅ Low risk investment")
                     elif volatility < 40:
                         st.warning("⚠️ Medium risk investment")
-                else:
+                    else:
                         st.error("🚨 High risk investment")
 
 elif analysis_tab == "📈 Market Overview":
     st.header("📈 Market Overview")
     col1, col2, col3 = st.columns([2, 1, 1])
-    with col1: st.info("🌐 **Real-time global market data** (with fallback to demo data)")
+    with col1: 
+        st.info("🌐 **Real-time global market data** (with fallback to demo data)")
     with col2:
-        if st.button("🔄 Refresh Markets"): st.rerun()
-    with col3: st.success("✅ **Markets Open**")
+        if st.button("🔄 Refresh Markets"): 
+            st.rerun()
+    with col3: 
+        st.success("✅ **Markets Open**")
     
     st.subheader("🌍 Global Markets")
     with st.spinner("Loading global market data..."):
@@ -772,12 +900,17 @@ elif analysis_tab == "📈 Market Overview":
             cols = st.columns(len(row))
             for col, item in zip(cols, row):
                 with col:
-                    if 'Treasury' in item['name']: price_str = f"{item['price']:.2f}%"
-                    elif item['price'] > 1000: price_str = f"${item['price']:,.0f}"
-                    else: price_str = f"${item['price']:.2f}"
+                    if 'Treasury' in item['name']: 
+                        price_str = f"{item['price']:.2f}%"
+                    elif item['price'] > 1000: 
+                        price_str = f"${item['price']:,.0f}"
+                    else: 
+                        price_str = f"${item['price']:.2f}"
                     delta_str = f"{item['change']:+.2f} ({item['change_percent']:+.2f}%)"
-                    if item['change_percent'] > 0: st.metric(item['name'], price_str, delta_str, delta_color="normal")
-                    else: st.metric(item['name'], price_str, delta_str, delta_color="inverse")
+                    if item['change_percent'] > 0: 
+                        st.metric(item['name'], price_str, delta_str, delta_color="normal")
+                    else: 
+                        st.metric(item['name'], price_str, delta_str, delta_color="inverse")
         
         st.subheader("📊 Market Summary")
         col1, col2, col3, col4 = st.columns(4)
@@ -807,6 +940,8 @@ elif analysis_tab == "🌍 Global Markets":
         markets = get_global_markets_overview()
     
     if markets:
+        st.success(f"✅ Loaded {len(markets)} global market indices")
+        
         # Display in a more organized grid
         for i in range(0, len(markets), 4):
             row = markets[i:i+4]
@@ -835,6 +970,22 @@ elif analysis_tab == "🌍 Global Markets":
             losers = sorted(markets, key=lambda x: x['change_percent'])[:5]
             for i, mover in enumerate(losers, 1):
                 st.write(f"{i}. {mover['name']}: {mover['change_percent']:+.2f}%")
+        
+        # Market Summary
+        st.subheader("📊 Global Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for m in markets if m['change_percent'] > 0)
+        negative_count = sum(1 for m in markets if m['change_percent'] < 0)
+        avg_change = sum(m['change_percent'] for m in markets) / len(markets)
+        with col1: st.metric("Markets Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Markets Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4:
+            if avg_change > 0: st.metric("Overall Sentiment", "🟢 Bullish", f"+{avg_change:.2f}%")
+            else: st.metric("Overall Sentiment", "🔴 Bearish", f"{avg_change:.2f}%")
+    else:
+        st.error("❌ Unable to load global market data")
+        st.info("💡 This might be due to network connectivity or API limits. Demo data should be used as fallback.")
 
 elif analysis_tab == "💱 Forex Analysis":
     st.header("💱 Forex Analysis")
@@ -1040,9 +1191,9 @@ elif analysis_tab == "🔴 Real-Time Data":
             realtime_mode = st.checkbox("🔴 Enable Real-Time Mode", value=False, help="Enable live data streaming and auto-refresh")
         with col2:
             if st.button("🔄 Refresh All"):
-                st.cache_data.clear()
+                cache.clear()
                 st.rerun()
-    with col3:
+        with col3:
             if st.button("⏸️ Stop Real-Time"):
                 stop_real_time_mode()
                 st.rerun()
@@ -1097,9 +1248,9 @@ elif analysis_tab == "🤖 Enhanced ML":
         # Fallback to basic ML analysis
         st.subheader("📊 Basic ML Analysis (Fallback)")
         col1, col2 = st.columns([1, 3])
-    with col1:
+        with col1:
             symbol = st.text_input("Stock Symbol", value="AAPL")
-    with col2:
+        with col2:
             period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
         
         if st.button("🚀 Run Basic ML Analysis", type="primary"):
@@ -1157,10 +1308,14 @@ elif analysis_tab == "🤖 Enhanced ML":
                         st.subheader("📈 Basic Analysis")
                         basic = analysis_results['basic_analysis']
                     col1, col2, col3, col4 = st.columns(4)
-                        with col1: st.metric("Current Price", f"${basic['current_price']:.2f}")
-                        with col2: st.metric("Volatility", f"{basic['volatility']:.2f}%")
-                        with col3: st.metric("Trend", basic['trend'])
-                        with col4: st.metric("Avg Volume", f"{basic['volume_avg']:,.0f}")
+                    with col1: 
+                        st.metric("Current Price", f"${basic['current_price']:.2f}")
+                    with col2: 
+                        st.metric("Volatility", f"{basic['volatility']:.2f}%")
+                    with col3: 
+                        st.metric("Trend", basic['trend'])
+                    with col4: 
+                        st.metric("Avg Volume", f"{basic['volume_avg']:,.0f}")
                     
                     # Sentiment Analysis
                     if analysis_results['sentiment_analysis']:
@@ -1171,7 +1326,7 @@ elif analysis_tab == "🤖 Enhanced ML":
                             col1, col2, col3 = st.columns(3)
                             with col1:
                                 st.metric("TextBlob Polarity", f"{sentiment['textblob']['polarity']:.3f}")
-                    with col2:
+                            with col2:
                                 st.metric("TextBlob Subjectivity", f"{sentiment['textblob']['subjectivity']:.3f}")
                             with col3:
                                 st.metric("TextBlob Label", sentiment['textblob']['label'])
@@ -1182,7 +1337,7 @@ elif analysis_tab == "🤖 Enhanced ML":
                                 st.metric("VADER Compound", f"{sentiment['vader']['compound']:.3f}")
                             with col2:
                                 st.metric("VADER Positive", f"{sentiment['vader']['positive']:.3f}")
-                    with col3:
+                            with col3:
                                 st.metric("VADER Label", sentiment['vader']['label'])
                     
                     # Advanced Metrics

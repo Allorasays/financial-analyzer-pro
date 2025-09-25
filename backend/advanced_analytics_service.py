@@ -844,3 +844,4 @@ class AdvancedAnalyticsService:
         except Exception as e:
             logger.error(f"Failed to get analytics stats: {e}")
             return {"error": str(e)}
+

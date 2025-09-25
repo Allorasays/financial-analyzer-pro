@@ -136,3 +136,4 @@ class WebSocketResponse(BaseModel):
     message: str
     data: Optional[Dict[str, Any]] = None
     timestamp: float
+

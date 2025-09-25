@@ -355,3 +355,4 @@ class RealTimeService:
         except Exception as e:
             logger.error(f"Failed to force update portfolio for user {user_id}: {e}")
             return False
+
