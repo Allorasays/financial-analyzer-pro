@@ -4,11 +4,11 @@ services:
     name: financial-analyzer-pro-simple
     env: python
     plan: free
-    buildCommand: pip install -r requirements_render_enhanced.txt --no-cache-dir
+    buildCommand: pip install -r requirements_render_enhanced.txt --no-cache-dir --upgrade pip
     startCommand: python -m streamlit run app_render_simple.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.10.0
       - key: PORT
         value: 8501
       - key: STREAMLIT_SERVER_HEADLESS
