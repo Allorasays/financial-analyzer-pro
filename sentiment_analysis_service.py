@@ -1,495 +1,613 @@
+#!/usr/bin/env python3
 """
-Sentiment Analysis Service for Financial Analyzer Pro
-News and social media sentiment analysis for enhanced ML predictions
+Sentiment Analysis Service for financial news and market sentiment
 """
 
-import streamlit as st
-import pandas as pd
-import numpy as np
+import asyncio
+import logging
 import requests
 import json
+from typing import Dict, List, Optional
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+import yfinance as yf
+from textblob import TextBlob
 import re
-import warnings
-warnings.filterwarnings('ignore')
 
-# Sentiment analysis imports with graceful fallbacks
-try:
-    from textblob import TextBlob
-    TEXTBLOB_AVAILABLE = True
-except ImportError:
-    TEXTBLOB_AVAILABLE = False
+from cache_service import CacheService
+from config import settings
 
-try:
-    import nltk
-    from nltk.sentiment import SentimentIntensityAnalyzer
-    from nltk.corpus import stopwords
-    from nltk.tokenize import word_tokenize
-    NLTK_AVAILABLE = True
-except ImportError:
-    NLTK_AVAILABLE = False
-
-try:
-    from transformers import pipeline, AutoTokenizer, AutoModelForSequenceClassification
-    TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    TRANSFORMERS_AVAILABLE = False
+logger = logging.getLogger(__name__)
 
 class SentimentAnalysisService:
-    """Sentiment analysis service for financial news and social media"""
-    
     def __init__(self):
-        self.news_sentiment_cache = {}
-        self.social_sentiment_cache = {}
-        self.sentiment_models = {}
-        self._initialize_models()
+        self.cache_service = CacheService()
+        self.background_task = None
         
-    def _initialize_models(self):
-        """Initialize sentiment analysis models"""
-        # TextBlob (always available if installed)
-        if TEXTBLOB_AVAILABLE:
-            self.sentiment_models['textblob'] = TextBlob
+        # News sources and APIs
+        self.news_sources = [
+            "financial-news",
+            "market-news",
+            "earnings-news"
+        ]
         
-        # NLTK VADER
-        if NLTK_AVAILABLE:
+        # Sentiment keywords
+        self.positive_keywords = [
+            "bullish", "surge", "rally", "gain", "profit", "growth", "positive",
+            "strong", "outperform", "buy", "upgrade", "beat", "exceed", "rise",
+            "increase", "improve", "optimistic", "confident", "success"
+        ]
+        
+        self.negative_keywords = [
+            "bearish", "decline", "fall", "loss", "drop", "negative", "weak",
+            "underperform", "sell", "downgrade", "miss", "disappoint", "fall",
+            "decrease", "worsen", "pessimistic", "concern", "risk", "crash"
+        ]
+    
+    async def start_background_tasks(self):
+        """Start background sentiment analysis tasks"""
+        if self.background_task is None:
+            self.background_task = asyncio.create_task(self._background_sentiment_analysis())
+            logger.info("Sentiment Analysis background tasks started")
+    
+    async def stop_background_tasks(self):
+        """Stop background sentiment analysis tasks"""
+        if self.background_task:
+            self.background_task.cancel()
             try:
-                # Download required NLTK data
-                import nltk
-                nltk.download('vader_lexicon', quiet=True)
-                nltk.download('stopwords', quiet=True)
-                nltk.download('punkt', quiet=True)
+                await self.background_task
+            except asyncio.CancelledError:
+                pass
+            self.background_task = None
+            logger.info("Sentiment Analysis background tasks stopped")
+    
+    async def analyze_symbol_sentiment(self, symbol: str) -> Dict:
+        """Analyze sentiment for a specific symbol"""
+        try:
+            cache_key = f"sentiment_{symbol}"
+            cached_sentiment = await self.cache_service.get(cache_key)
+            if cached_sentiment:
+                return cached_sentiment
+            
+            # Get news data
+            news_data = await self._fetch_symbol_news(symbol)
+            
+            # Analyze sentiment
+            sentiment_analysis = self._analyze_news_sentiment(news_data)
+            
+            # Get social sentiment (simplified)
+            social_sentiment = await self._analyze_social_sentiment(symbol)
+            
+            # Calculate overall sentiment
+            overall_sentiment = self._calculate_overall_sentiment(
+                sentiment_analysis, social_sentiment
+            )
+            
+            result = {
+                "symbol": symbol,
+                "overall_sentiment": overall_sentiment["sentiment"],
+                "sentiment_score": overall_sentiment["score"],
+                "confidence": overall_sentiment["confidence"],
+                "news_sentiment": sentiment_analysis,
+                "social_sentiment": social_sentiment,
+                "sentiment_trend": overall_sentiment["trend"],
+                "key_insights": overall_sentiment["insights"],
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache for 30 minutes
+            await self.cache_service.set(cache_key, result, 1800)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Sentiment analysis failed for {symbol}: {e}")
+            return {"error": str(e)}
+    
+    async def analyze_market_sentiment(self) -> Dict:
+        """Analyze overall market sentiment"""
+        try:
+            cache_key = "market_sentiment"
+            cached_sentiment = await self.cache_service.get(cache_key)
+            if cached_sentiment:
+                return cached_sentiment
+            
+            # Get market news
+            market_news = await self._fetch_market_news()
+            
+            # Analyze sentiment
+            sentiment_analysis = self._analyze_news_sentiment(market_news)
+            
+            # Get VIX data (fear gauge)
+            vix_sentiment = await self._analyze_vix_sentiment()
+            
+            # Calculate market sentiment
+            market_sentiment = self._calculate_market_sentiment(
+                sentiment_analysis, vix_sentiment
+            )
+            
+            result = {
+                "market_sentiment": market_sentiment["sentiment"],
+                "sentiment_score": market_sentiment["score"],
+                "confidence": market_sentiment["confidence"],
+                "news_sentiment": sentiment_analysis,
+                "vix_sentiment": vix_sentiment,
+                "sentiment_trend": market_sentiment["trend"],
+                "key_insights": market_sentiment["insights"],
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            # Cache for 15 minutes
+            await self.cache_service.set(cache_key, result, 900)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"Market sentiment analysis failed: {e}")
+            return {"error": str(e)}
+    
+    async def analyze_news_sentiment(self, news_text: str) -> Dict:
+        """Analyze sentiment of news text"""
+        try:
+            # Clean text
+            cleaned_text = self._clean_text(news_text)
+            
+            # TextBlob sentiment
+            blob = TextBlob(cleaned_text)
+            polarity = blob.sentiment.polarity
+            subjectivity = blob.sentiment.subjectivity
+            
+            # Keyword-based sentiment
+            keyword_sentiment = self._analyze_keyword_sentiment(cleaned_text)
+            
+            # Combine analyses
+            combined_sentiment = self._combine_sentiment_analyses(
+                polarity, subjectivity, keyword_sentiment
+            )
+            
+            return {
+                "textblob_polarity": polarity,
+                "textblob_subjectivity": subjectivity,
+                "keyword_sentiment": keyword_sentiment,
+                "combined_sentiment": combined_sentiment["sentiment"],
+                "combined_score": combined_sentiment["score"],
+                "confidence": combined_sentiment["confidence"]
+            }
+            
+        except Exception as e:
+            logger.error(f"News sentiment analysis failed: {e}")
+            return {"error": str(e)}
+    
+    async def _fetch_symbol_news(self, symbol: str) -> List[Dict]:
+        """Fetch news data for a symbol"""
+        try:
+            # Use yfinance to get news
+            ticker = yf.Ticker(symbol)
+            news = ticker.news
+            
+            # Process news data
+            processed_news = []
+            for article in news[:10]:  # Limit to 10 articles
+                processed_news.append({
+                    "title": article.get("title", ""),
+                    "summary": article.get("summary", ""),
+                    "publisher": article.get("publisher", ""),
+                    "published": article.get("providerPublishTime", 0),
+                    "url": article.get("link", "")
+                })
+            
+            return processed_news
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch news for {symbol}: {e}")
+            return []
+    
+    async def _fetch_market_news(self) -> List[Dict]:
+        """Fetch general market news"""
+        try:
+            # This would integrate with news APIs like NewsAPI, Alpha Vantage, etc.
+            # For now, we'll use a simplified approach
+            
+            market_news = [
+                {
+                    "title": "Market Update: Stocks Show Mixed Signals",
+                    "summary": "The market is showing mixed signals with some sectors performing well while others face headwinds.",
+                    "publisher": "Financial News",
+                    "published": int(datetime.now().timestamp()),
+                    "url": ""
+                }
+            ]
+            
+            return market_news
+            
+        except Exception as e:
+            logger.error(f"Failed to fetch market news: {e}")
+            return []
+    
+    def _analyze_news_sentiment(self, news_data: List[Dict]) -> Dict:
+        """Analyze sentiment from news data"""
+        try:
+            if not news_data:
+                return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+            
+            total_sentiment = 0
+            total_confidence = 0
+            article_count = 0
+            
+            for article in news_data:
+                # Combine title and summary
+                text = f"{article.get('title', '')} {article.get('summary', '')}"
                 
-                self.sentiment_models['vader'] = SentimentIntensityAnalyzer()
-                self.sentiment_models['stopwords'] = set(stopwords.words('english'))
-            except Exception as e:
-                st.warning(f"NLTK initialization failed: {str(e)}")
-        
-        # Transformers (Hugging Face)
-        if TRANSFORMERS_AVAILABLE:
-            try:
-                # Financial sentiment model
-                self.sentiment_models['financial_bert'] = pipeline(
-                    "sentiment-analysis",
-                    model="ProsusAI/finbert",
-                    tokenizer="ProsusAI/finbert"
-                )
-            except Exception as e:
-                st.warning(f"Financial BERT initialization failed: {str(e)}")
-                try:
-                    # Fallback to general sentiment model
-                    self.sentiment_models['general_bert'] = pipeline(
-                        "sentiment-analysis",
-                        model="cardiffnlp/twitter-roberta-base-sentiment-latest"
-                    )
-                except Exception as e2:
-                    st.warning(f"General BERT initialization failed: {str(e2)}")
+                # Analyze sentiment
+                sentiment_result = self._analyze_text_sentiment(text)
+                
+                if sentiment_result:
+                    total_sentiment += sentiment_result["score"]
+                    total_confidence += sentiment_result["confidence"]
+                    article_count += 1
+            
+            if article_count == 0:
+                return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+            
+            avg_sentiment = total_sentiment / article_count
+            avg_confidence = total_confidence / article_count
+            
+            # Determine sentiment category
+            if avg_sentiment > 0.2:
+                sentiment = "Positive"
+            elif avg_sentiment < -0.2:
+                sentiment = "Negative"
+            else:
+                sentiment = "Neutral"
+            
+            return {
+                "sentiment": sentiment,
+                "score": avg_sentiment,
+                "confidence": avg_confidence,
+                "article_count": article_count
+            }
+            
+        except Exception as e:
+            logger.error(f"News sentiment analysis failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
     
-    def analyze_news_sentiment(self, symbol: str, days_back: int = 7) -> Dict[str, Any]:
-        """Analyze news sentiment for a symbol"""
-        cache_key = f"news_{symbol}_{days_back}"
-        
-        if cache_key in self.news_sentiment_cache:
-            return self.news_sentiment_cache[cache_key]
-        
-        # Simulate news data (in real implementation, use news API)
-        news_data = self._simulate_news_data(symbol, days_back)
-        
-        if not news_data:
-            return {"error": "No news data available"}
-        
-        # Analyze sentiment for each news item
-        sentiment_scores = []
-        for article in news_data:
-            sentiment = self._analyze_text_sentiment(article['title'] + " " + article['content'])
-            sentiment_scores.append({
-                'date': article['date'],
-                'title': article['title'],
-                'sentiment': sentiment,
-                'source': article['source']
-            })
-        
-        # Calculate aggregate sentiment
-        aggregate_sentiment = self._calculate_aggregate_sentiment(sentiment_scores)
-        
-        result = {
-            'symbol': symbol,
-            'period_days': days_back,
-            'total_articles': len(news_data),
-            'sentiment_scores': sentiment_scores,
-            'aggregate_sentiment': aggregate_sentiment,
-            'last_updated': datetime.now().isoformat()
-        }
-        
-        self.news_sentiment_cache[cache_key] = result
-        return result
+    def _analyze_text_sentiment(self, text: str) -> Optional[Dict]:
+        """Analyze sentiment of text"""
+        try:
+            if not text:
+                return None
+            
+            # Clean text
+            cleaned_text = self._clean_text(text)
+            
+            # TextBlob sentiment
+            blob = TextBlob(cleaned_text)
+            polarity = blob.sentiment.polarity
+            subjectivity = blob.sentiment.subjectivity
+            
+            # Keyword-based sentiment
+            keyword_sentiment = self._analyze_keyword_sentiment(cleaned_text)
+            
+            # Combine analyses
+            combined_score = (polarity + keyword_sentiment["score"]) / 2
+            combined_confidence = (subjectivity + keyword_sentiment["confidence"]) / 2
+            
+            return {
+                "score": combined_score,
+                "confidence": combined_confidence
+            }
+            
+        except Exception as e:
+            logger.error(f"Text sentiment analysis failed: {e}")
+            return None
     
-    def analyze_social_sentiment(self, symbol: str, platform: str = "twitter", 
-                               days_back: int = 7) -> Dict[str, Any]:
-        """Analyze social media sentiment for a symbol"""
-        cache_key = f"social_{symbol}_{platform}_{days_back}"
-        
-        if cache_key in self.social_sentiment_cache:
-            return self.social_sentiment_cache[cache_key]
-        
-        # Simulate social media data (in real implementation, use social media API)
-        social_data = self._simulate_social_data(symbol, platform, days_back)
-        
-        if not social_data:
-            return {"error": "No social media data available"}
-        
-        # Analyze sentiment for each post
-        sentiment_scores = []
-        for post in social_data:
-            sentiment = self._analyze_text_sentiment(post['text'])
-            sentiment_scores.append({
-                'date': post['date'],
-                'text': post['text'][:100] + "...",  # Truncate for display
-                'sentiment': sentiment,
-                'platform': post['platform'],
-                'engagement': post.get('engagement', 0)
-            })
-        
-        # Calculate aggregate sentiment
-        aggregate_sentiment = self._calculate_aggregate_sentiment(sentiment_scores)
-        
-        result = {
-            'symbol': symbol,
-            'platform': platform,
-            'period_days': days_back,
-            'total_posts': len(social_data),
-            'sentiment_scores': sentiment_scores,
-            'aggregate_sentiment': aggregate_sentiment,
-            'last_updated': datetime.now().isoformat()
-        }
-        
-        self.social_sentiment_cache[cache_key] = result
-        return result
+    def _analyze_keyword_sentiment(self, text: str) -> Dict:
+        """Analyze sentiment based on keywords"""
+        try:
+            text_lower = text.lower()
+            
+            positive_count = sum(1 for keyword in self.positive_keywords if keyword in text_lower)
+            negative_count = sum(1 for keyword in self.negative_keywords if keyword in text_lower)
+            
+            total_keywords = positive_count + negative_count
+            
+            if total_keywords == 0:
+                return {"score": 0, "confidence": 0}
+            
+            # Calculate score (-1 to 1)
+            score = (positive_count - negative_count) / total_keywords
+            
+            # Calculate confidence (0 to 1)
+            confidence = min(1, total_keywords / 10)  # More keywords = higher confidence
+            
+            return {"score": score, "confidence": confidence}
+            
+        except Exception as e:
+            logger.error(f"Keyword sentiment analysis failed: {e}")
+            return {"score": 0, "confidence": 0}
     
-    def _simulate_news_data(self, symbol: str, days_back: int) -> List[Dict[str, Any]]:
-        """Simulate news data (replace with real news API)"""
-        # This is a simulation - in production, use real news APIs like:
-        # - NewsAPI
-        # - Alpha Vantage News
-        # - Financial Modeling Prep News
-        # - Benzinga News
-        
-        news_items = []
-        base_date = datetime.now() - timedelta(days=days_back)
-        
-        # Simulate different types of news with varying sentiment
-        news_templates = [
-            f"{symbol} reports strong quarterly earnings, beating analyst expectations",
-            f"{symbol} announces major partnership deal, boosting investor confidence",
-            f"{symbol} faces regulatory challenges, causing market uncertainty",
-            f"{symbol} stock price surges on positive analyst upgrades",
-            f"{symbol} experiences technical difficulties, affecting user experience",
-            f"{symbol} launches innovative product, gaining market traction",
-            f"{symbol} faces increased competition, impacting market share",
-            f"{symbol} receives positive analyst coverage, driving investor interest",
-            f"{symbol} announces cost-cutting measures, improving profitability",
-            f"{symbol} stock volatility increases due to market conditions"
-        ]
-        
-        for i in range(min(20, days_back * 3)):  # Simulate 3 articles per day
-            news_items.append({
-                'date': (base_date + timedelta(days=i//3, hours=i%24)).isoformat(),
-                'title': news_templates[i % len(news_templates)],
-                'content': f"Detailed analysis of {symbol} performance and market outlook. " + 
-                          f"Analysts are closely watching the company's strategic moves and " +
-                          f"market positioning in the current economic environment.",
-                'source': f"Financial News {i%5 + 1}",
-                'url': f"https://example.com/news/{symbol}_{i}"
-            })
-        
-        return news_items
+    async def _analyze_social_sentiment(self, symbol: str) -> Dict:
+        """Analyze social media sentiment (simplified)"""
+        try:
+            # This would integrate with social media APIs
+            # For now, we'll return a mock analysis
+            
+            return {
+                "sentiment": "Neutral",
+                "score": 0,
+                "confidence": 0.5,
+                "source": "Social Media",
+                "note": "Social sentiment analysis not implemented"
+            }
+            
+        except Exception as e:
+            logger.error(f"Social sentiment analysis failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
     
-    def _simulate_social_data(self, symbol: str, platform: str, days_back: int) -> List[Dict[str, Any]]:
-        """Simulate social media data (replace with real social media API)"""
-        # This is a simulation - in production, use real social media APIs like:
-        # - Twitter API v2
-        # - Reddit API
-        # - StockTwits API
-        
-        social_posts = []
-        base_date = datetime.now() - timedelta(days=days_back)
-        
-        # Simulate different types of social media posts
-        post_templates = [
-            f"$SYMBOL looking bullish today! Great earnings report 📈",
-            f"$SYMBOL stock is overvalued, time to sell 💸",
-            f"$SYMBOL breaking resistance levels, moon incoming 🚀",
-            f"$SYMBOL disappointing guidance, bearish outlook 📉",
-            f"$SYMBOL solid fundamentals, long-term hold 💎",
-            f"$SYMBOL technical analysis shows strong support levels",
-            f"$SYMBOL management team making smart strategic moves",
-            f"$SYMBOL facing headwinds in current market conditions",
-            f"$SYMBOL innovation pipeline looks promising for growth",
-            f"$SYMBOL regulatory concerns weighing on stock price"
-        ]
-        
-        for i in range(min(50, days_back * 10)):  # Simulate 10 posts per day
-            post_text = post_templates[i % len(post_templates)].replace("SYMBOL", symbol)
-            social_posts.append({
-                'date': (base_date + timedelta(days=i//10, hours=i%24)).isoformat(),
-                'text': post_text,
-                'platform': platform,
-                'engagement': np.random.randint(1, 1000),
-                'author': f"user_{i%20}"
-            })
-        
-        return social_posts
+    async def _analyze_vix_sentiment(self) -> Dict:
+        """Analyze VIX (fear gauge) sentiment"""
+        try:
+            # Get VIX data
+            vix = yf.Ticker("^VIX")
+            hist = vix.history(period="5d")
+            
+            if hist is None or hist.empty:
+                return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+            
+            current_vix = hist['Close'].iloc[-1]
+            avg_vix = hist['Close'].mean()
+            
+            # VIX interpretation
+            if current_vix > avg_vix * 1.2:
+                sentiment = "Fearful"
+                score = -0.8
+            elif current_vix > avg_vix * 1.1:
+                sentiment = "Cautious"
+                score = -0.4
+            elif current_vix < avg_vix * 0.8:
+                sentiment = "Complacent"
+                score = 0.4
+            else:
+                sentiment = "Neutral"
+                score = 0
+            
+            return {
+                "sentiment": sentiment,
+                "score": score,
+                "confidence": 0.8,
+                "vix_level": current_vix,
+                "avg_vix": avg_vix
+            }
+            
+        except Exception as e:
+            logger.error(f"VIX sentiment analysis failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
     
-    def _analyze_text_sentiment(self, text: str) -> Dict[str, float]:
-        """Analyze sentiment of text using available models"""
-        sentiment_scores = {}
-        
-        # Clean text
-        cleaned_text = self._clean_text(text)
-        
-        # TextBlob sentiment
-        if 'textblob' in self.sentiment_models:
-            try:
-                blob = self.sentiment_models['textblob'](cleaned_text)
-                sentiment_scores['textblob'] = {
-                    'polarity': blob.sentiment.polarity,  # -1 to 1
-                    'subjectivity': blob.sentiment.subjectivity,  # 0 to 1
-                    'label': 'positive' if blob.sentiment.polarity > 0.1 else 
-                            'negative' if blob.sentiment.polarity < -0.1 else 'neutral'
-                }
-            except Exception as e:
-                st.warning(f"TextBlob analysis failed: {str(e)}")
-        
-        # VADER sentiment
-        if 'vader' in self.sentiment_models:
-            try:
-                vader_scores = self.sentiment_models['vader'].polarity_scores(cleaned_text)
-                sentiment_scores['vader'] = {
-                    'compound': vader_scores['compound'],
-                    'positive': vader_scores['pos'],
-                    'negative': vader_scores['neg'],
-                    'neutral': vader_scores['neu'],
-                    'label': 'positive' if vader_scores['compound'] > 0.05 else
-                            'negative' if vader_scores['compound'] < -0.05 else 'neutral'
-                }
-            except Exception as e:
-                st.warning(f"VADER analysis failed: {str(e)}")
-        
-        # BERT sentiment
-        if 'financial_bert' in self.sentiment_models:
-            try:
-                bert_result = self.sentiment_models['financial_bert'](cleaned_text[:512])  # Truncate for BERT
-                sentiment_scores['financial_bert'] = {
-                    'label': bert_result[0]['label'],
-                    'score': bert_result[0]['score']
-                }
-            except Exception as e:
-                st.warning(f"Financial BERT analysis failed: {str(e)}")
-        elif 'general_bert' in self.sentiment_models:
-            try:
-                bert_result = self.sentiment_models['general_bert'](cleaned_text[:512])
-                sentiment_scores['general_bert'] = {
-                    'label': bert_result[0]['label'],
-                    'score': bert_result[0]['score']
-                }
-            except Exception as e:
-                st.warning(f"General BERT analysis failed: {str(e)}")
-        
-        return sentiment_scores
+    def _calculate_overall_sentiment(self, news_sentiment: Dict, social_sentiment: Dict) -> Dict:
+        """Calculate overall sentiment from multiple sources"""
+        try:
+            # Weighted average of sentiment sources
+            news_weight = 0.7
+            social_weight = 0.3
+            
+            overall_score = (
+                news_sentiment.get("score", 0) * news_weight +
+                social_sentiment.get("score", 0) * social_weight
+            )
+            
+            overall_confidence = (
+                news_sentiment.get("confidence", 0) * news_weight +
+                social_sentiment.get("confidence", 0) * social_weight
+            )
+            
+            # Determine sentiment
+            if overall_score > 0.2:
+                sentiment = "Positive"
+                trend = "Bullish"
+            elif overall_score < -0.2:
+                sentiment = "Negative"
+                trend = "Bearish"
+            else:
+                sentiment = "Neutral"
+                trend = "Sideways"
+            
+            # Generate insights
+            insights = self._generate_sentiment_insights(
+                sentiment, overall_score, news_sentiment, social_sentiment
+            )
+            
+            return {
+                "sentiment": sentiment,
+                "score": overall_score,
+                "confidence": overall_confidence,
+                "trend": trend,
+                "insights": insights
+            }
+            
+        except Exception as e:
+            logger.error(f"Overall sentiment calculation failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+    
+    def _calculate_market_sentiment(self, news_sentiment: Dict, vix_sentiment: Dict) -> Dict:
+        """Calculate overall market sentiment"""
+        try:
+            # Weighted average
+            news_weight = 0.6
+            vix_weight = 0.4
+            
+            overall_score = (
+                news_sentiment.get("score", 0) * news_weight +
+                vix_sentiment.get("score", 0) * vix_weight
+            )
+            
+            overall_confidence = (
+                news_sentiment.get("confidence", 0) * news_weight +
+                vix_sentiment.get("confidence", 0) * vix_weight
+            )
+            
+            # Determine sentiment
+            if overall_score > 0.2:
+                sentiment = "Bullish"
+                trend = "Positive"
+            elif overall_score < -0.2:
+                sentiment = "Bearish"
+                trend = "Negative"
+            else:
+                sentiment = "Neutral"
+                trend = "Sideways"
+            
+            # Generate insights
+            insights = self._generate_market_insights(
+                sentiment, overall_score, news_sentiment, vix_sentiment
+            )
+            
+            return {
+                "sentiment": sentiment,
+                "score": overall_score,
+                "confidence": overall_confidence,
+                "trend": trend,
+                "insights": insights
+            }
+            
+        except Exception as e:
+            logger.error(f"Market sentiment calculation failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+    
+    def _generate_sentiment_insights(self, sentiment: str, score: float, 
+                                    news_sentiment: Dict, social_sentiment: Dict) -> List[str]:
+        """Generate sentiment insights"""
+        try:
+            insights = []
+            
+            if sentiment == "Positive":
+                insights.append("Overall sentiment is positive")
+                insights.append("Consider bullish strategies")
+            elif sentiment == "Negative":
+                insights.append("Overall sentiment is negative")
+                insights.append("Consider defensive strategies")
+            else:
+                insights.append("Overall sentiment is neutral")
+                insights.append("Market is in consolidation phase")
+            
+            # News-specific insights
+            news_score = news_sentiment.get("score", 0)
+            if abs(news_score) > 0.5:
+                insights.append("Strong news sentiment detected")
+            
+            # Social-specific insights
+            social_score = social_sentiment.get("score", 0)
+            if abs(social_score) > 0.3:
+                insights.append("Social media sentiment is significant")
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Sentiment insights generation failed: {e}")
+            return []
+    
+    def _generate_market_insights(self, sentiment: str, score: float, 
+                                news_sentiment: Dict, vix_sentiment: Dict) -> List[str]:
+        """Generate market insights"""
+        try:
+            insights = []
+            
+            if sentiment == "Bullish":
+                insights.append("Market sentiment is bullish")
+                insights.append("Consider growth-oriented strategies")
+            elif sentiment == "Bearish":
+                insights.append("Market sentiment is bearish")
+                insights.append("Consider defensive strategies")
+            else:
+                insights.append("Market sentiment is neutral")
+                insights.append("Market is in consolidation phase")
+            
+            # VIX-specific insights
+            vix_sentiment_level = vix_sentiment.get("sentiment", "Neutral")
+            if vix_sentiment_level == "Fearful":
+                insights.append("High fear levels detected (VIX elevated)")
+                insights.append("Potential buying opportunity")
+            elif vix_sentiment_level == "Complacent":
+                insights.append("Low fear levels detected (VIX low)")
+                insights.append("Market may be overconfident")
+            
+            return insights
+            
+        except Exception as e:
+            logger.error(f"Market insights generation failed: {e}")
+            return []
     
     def _clean_text(self, text: str) -> str:
         """Clean text for sentiment analysis"""
-        # Remove URLs
-        text = re.sub(r'http\S+|www\S+|https\S+', '', text, flags=re.MULTILINE)
-        
-        # Remove special characters and numbers
-        text = re.sub(r'[^a-zA-Z\s]', '', text)
-        
-        # Remove extra whitespace
-        text = re.sub(r'\s+', ' ', text).strip()
-        
-        # Remove stopwords if available
-        if 'stopwords' in self.sentiment_models:
-            words = text.lower().split()
-            words = [word for word in words if word not in self.sentiment_models['stopwords']]
-            text = ' '.join(words)
-        
-        return text
-    
-    def _calculate_aggregate_sentiment(self, sentiment_scores: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate aggregate sentiment from individual scores"""
-        if not sentiment_scores:
-            return {"error": "No sentiment scores available"}
-        
-        # Collect all sentiment scores
-        all_scores = []
-        for item in sentiment_scores:
-            if 'sentiment' in item:
-                all_scores.append(item['sentiment'])
-        
-        if not all_scores:
-            return {"error": "No valid sentiment scores"}
-        
-        # Calculate aggregate metrics
-        aggregate = {
-            'total_items': len(sentiment_scores),
-            'positive_count': 0,
-            'negative_count': 0,
-            'neutral_count': 0,
-            'average_polarity': 0,
-            'average_compound': 0,
-            'sentiment_distribution': {},
-            'confidence_score': 0
-        }
-        
-        # Aggregate TextBlob scores
-        textblob_scores = [s.get('textblob', {}) for s in all_scores if 'textblob' in s]
-        if textblob_scores:
-            polarities = [s.get('polarity', 0) for s in textblob_scores]
-            aggregate['average_polarity'] = np.mean(polarities)
+        try:
+            # Remove special characters and normalize
+            cleaned = re.sub(r'[^\w\s]', ' ', text)
+            cleaned = re.sub(r'\s+', ' ', cleaned)
+            return cleaned.strip().lower()
             
-            for s in textblob_scores:
-                label = s.get('label', 'neutral')
-                if label == 'positive':
-                    aggregate['positive_count'] += 1
-                elif label == 'negative':
-                    aggregate['negative_count'] += 1
-                else:
-                    aggregate['neutral_count'] += 1
-        
-        # Aggregate VADER scores
-        vader_scores = [s.get('vader', {}) for s in all_scores if 'vader' in s]
-        if vader_scores:
-            compounds = [s.get('compound', 0) for s in vader_scores]
-            aggregate['average_compound'] = np.mean(compounds)
-        
-        # Calculate sentiment distribution
-        total_items = aggregate['total_items']
-        if total_items > 0:
-            aggregate['sentiment_distribution'] = {
-                'positive': aggregate['positive_count'] / total_items,
-                'negative': aggregate['negative_count'] / total_items,
-                'neutral': aggregate['neutral_count'] / total_items
+        except Exception as e:
+            logger.error(f"Text cleaning failed: {e}")
+            return text
+    
+    def _combine_sentiment_analyses(self, polarity: float, subjectivity: float, 
+                                  keyword_sentiment: Dict) -> Dict:
+        """Combine different sentiment analyses"""
+        try:
+            # Weighted combination
+            textblob_weight = 0.6
+            keyword_weight = 0.4
+            
+            combined_score = (
+                polarity * textblob_weight +
+                keyword_sentiment.get("score", 0) * keyword_weight
+            )
+            
+            combined_confidence = (
+                subjectivity * textblob_weight +
+                keyword_sentiment.get("confidence", 0) * keyword_weight
+            )
+            
+            # Determine sentiment
+            if combined_score > 0.1:
+                sentiment = "Positive"
+            elif combined_score < -0.1:
+                sentiment = "Negative"
+            else:
+                sentiment = "Neutral"
+            
+            return {
+                "sentiment": sentiment,
+                "score": combined_score,
+                "confidence": combined_confidence
             }
-        
-        # Calculate confidence score (based on consistency)
-        if len(textblob_scores) > 1:
-            polarities = [s.get('polarity', 0) for s in textblob_scores]
-            aggregate['confidence_score'] = 1 - np.std(polarities)  # Lower std = higher confidence
-        
-        # Overall sentiment label
-        if aggregate['average_polarity'] > 0.1:
-            aggregate['overall_sentiment'] = 'positive'
-        elif aggregate['average_polarity'] < -0.1:
-            aggregate['overall_sentiment'] = 'negative'
-        else:
-            aggregate['overall_sentiment'] = 'neutral'
-        
-        return aggregate
-    
-    def get_sentiment_features(self, symbol: str, days_back: int = 7) -> Dict[str, float]:
-        """Get sentiment features for ML models"""
-        # Get news sentiment
-        news_sentiment = self.analyze_news_sentiment(symbol, days_back)
-        
-        # Get social sentiment
-        social_sentiment = self.analyze_social_sentiment(symbol, "twitter", days_back)
-        
-        features = {}
-        
-        # News sentiment features
-        if 'aggregate_sentiment' in news_sentiment:
-            news_agg = news_sentiment['aggregate_sentiment']
-            features['news_polarity'] = news_agg.get('average_polarity', 0)
-            features['news_compound'] = news_agg.get('average_compound', 0)
-            features['news_confidence'] = news_agg.get('confidence_score', 0)
-            features['news_positive_ratio'] = news_agg.get('sentiment_distribution', {}).get('positive', 0)
-            features['news_negative_ratio'] = news_agg.get('sentiment_distribution', {}).get('negative', 0)
-            features['news_article_count'] = news_agg.get('total_items', 0)
-        
-        # Social sentiment features
-        if 'aggregate_sentiment' in social_sentiment:
-            social_agg = social_sentiment['aggregate_sentiment']
-            features['social_polarity'] = social_agg.get('average_polarity', 0)
-            features['social_compound'] = social_agg.get('average_compound', 0)
-            features['social_confidence'] = social_agg.get('confidence_score', 0)
-            features['social_positive_ratio'] = social_agg.get('sentiment_distribution', {}).get('positive', 0)
-            features['social_negative_ratio'] = social_agg.get('sentiment_distribution', {}).get('negative', 0)
-            features['social_post_count'] = social_agg.get('total_items', 0)
-        
-        # Combined sentiment features
-        features['combined_sentiment'] = (features.get('news_polarity', 0) + features.get('social_polarity', 0)) / 2
-        features['sentiment_volatility'] = np.std([features.get('news_polarity', 0), features.get('social_polarity', 0)])
-        
-        return features
-    
-    def display_sentiment_analysis(self, symbol: str, days_back: int = 7):
-        """Display sentiment analysis dashboard"""
-        st.subheader(f"📰 Sentiment Analysis for {symbol}")
-        
-        # News sentiment
-        with st.expander("📰 News Sentiment", expanded=True):
-            news_sentiment = self.analyze_news_sentiment(symbol, days_back)
             
-            if 'error' in news_sentiment:
-                st.error(f"News analysis error: {news_sentiment['error']}")
-            else:
-                agg = news_sentiment['aggregate_sentiment']
+        except Exception as e:
+            logger.error(f"Sentiment combination failed: {e}")
+            return {"sentiment": "Neutral", "score": 0, "confidence": 0}
+    
+    async def _background_sentiment_analysis(self):
+        """Background task for continuous sentiment analysis"""
+        while True:
+            try:
+                # This would perform continuous sentiment analysis
+                # For now, we'll just log that the task is running
+                logger.debug("Sentiment Analysis background task running")
+                await asyncio.sleep(1800)  # Run every 30 minutes
                 
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Articles", agg.get('total_items', 0))
-                with col2:
-                    st.metric("Polarity", f"{agg.get('average_polarity', 0):.3f}")
-                with col3:
-                    st.metric("Confidence", f"{agg.get('confidence_score', 0):.3f}")
-                with col4:
-                    sentiment_label = agg.get('overall_sentiment', 'neutral')
-                    color = "🟢" if sentiment_label == 'positive' else "🔴" if sentiment_label == 'negative' else "⚪"
-                    st.metric("Overall", f"{color} {sentiment_label.title()}")
-                
-                # Sentiment distribution
-                if 'sentiment_distribution' in agg:
-                    dist = agg['sentiment_distribution']
-                    fig = px.pie(
-                        values=[dist.get('positive', 0), dist.get('negative', 0), dist.get('neutral', 0)],
-                        names=['Positive', 'Negative', 'Neutral'],
-                        title="News Sentiment Distribution",
-                        color_discrete_map={'Positive': 'green', 'Negative': 'red', 'Neutral': 'gray'}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-        
-        # Social sentiment
-        with st.expander("🐦 Social Media Sentiment", expanded=True):
-            social_sentiment = self.analyze_social_sentiment(symbol, "twitter", days_back)
+            except Exception as e:
+                logger.error(f"Background sentiment analysis error: {e}")
+                await asyncio.sleep(1800)
+    
+    async def get_sentiment_stats(self) -> Dict:
+        """Get sentiment analysis service statistics"""
+        try:
+            return {
+                "background_task_running": self.background_task is not None,
+                "positive_keywords": len(self.positive_keywords),
+                "negative_keywords": len(self.negative_keywords),
+                "news_sources": len(self.news_sources),
+                "analyses_completed": 0,  # Would track actual analyses
+                "cache_hits": 0  # Would track actual cache hits
+            }
             
-            if 'error' in social_sentiment:
-                st.error(f"Social analysis error: {social_sentiment['error']}")
-            else:
-                agg = social_sentiment['aggregate_sentiment']
-                
-                col1, col2, col3, col4 = st.columns(4)
-                with col1:
-                    st.metric("Posts", agg.get('total_items', 0))
-                with col2:
-                    st.metric("Polarity", f"{agg.get('average_polarity', 0):.3f}")
-                with col3:
-                    st.metric("Confidence", f"{agg.get('confidence_score', 0):.3f}")
-                with col4:
-                    sentiment_label = agg.get('overall_sentiment', 'neutral')
-                    color = "🟢" if sentiment_label == 'positive' else "🔴" if sentiment_label == 'negative' else "⚪"
-                    st.metric("Overall", f"{color} {sentiment_label.title()}")
-                
-                # Sentiment distribution
-                if 'sentiment_distribution' in agg:
-                    dist = agg['sentiment_distribution']
-                    fig = px.pie(
-                        values=[dist.get('positive', 0), dist.get('negative', 0), dist.get('neutral', 0)],
-                        names=['Positive', 'Negative', 'Neutral'],
-                        title="Social Media Sentiment Distribution",
-                        color_discrete_map={'Positive': 'green', 'Negative': 'red', 'Neutral': 'gray'}
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
-
-# Global instance
-sentiment_service = SentimentAnalysisService()
+        except Exception as e:
+            logger.error(f"Failed to get sentiment stats: {e}")
+            return {"error": str(e)}
