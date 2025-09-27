@@ -1,14 +1,37 @@
 import streamlit as st
 import pandas as pd
-import plotly.graph_objects as go
-import plotly.express as px
-import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 import time
 import json
 import warnings
 warnings.filterwarnings('ignore')
+
+# Lazy import heavy libraries only when needed
+plotly_go = None
+plotly_px = None
+yfinance = None
+
+def get_plotly_go():
+    global plotly_go
+    if plotly_go is None:
+        import plotly.graph_objects as go
+        plotly_go = go
+    return plotly_go
+
+def get_plotly_px():
+    global plotly_px
+    if plotly_px is None:
+        import plotly.express as px
+        plotly_px = px
+    return plotly_px
+
+def get_yfinance():
+    global yfinance
+    if yfinance is None:
+        import yfinance as yf
+        yfinance = yf
+    return yfinance
 
 # Simple cache implementation
 class SimpleCache:
@@ -198,6 +221,7 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
     
     # Method 1: Try yfinance with extended period for ML
     try:
+        yf = get_yfinance()  # Lazy load yfinance
         ticker = yf.Ticker(symbol)
         
         # For ML predictions, always try to get at least 1 year of data
@@ -380,6 +404,7 @@ def get_market_overview():
     
     for symbol in symbols:
         try:
+            yf = get_yfinance()  # Lazy load yfinance
             ticker = yf.Ticker(symbol)
             hist = ticker.history(period="2d")
             
@@ -421,6 +446,7 @@ def get_global_markets_overview():
     
     for market in market_indices:
         try:
+            yf = get_yfinance()  # Lazy load yfinance
             ticker = yf.Ticker(market['symbol'])
             hist = ticker.history(period="2d", timeout=10)
             

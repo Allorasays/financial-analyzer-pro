@@ -489,3 +489,6 @@ class GlobalMarketsService:
 
 # Initialize global service
 global_markets_service = GlobalMarketsService()
+
+
+
