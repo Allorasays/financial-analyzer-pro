@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: financial-analyzer-fast
+    env: python
+    plan: free
+    buildCommand: |
+      echo "Building Financial Analyzer Pro - Fast Version..."
+      pip install --upgrade pip
+      pip install --upgrade setuptools wheel
+      pip install -r requirements_fast.txt --no-cache-dir
+      echo "Build completed successfully"
+    startCommand: streamlit run app_fast.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false --server.fileWatcherType none --server.runOnSave false
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
+      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
+        value: false
+      - key: STREAMLIT_SERVER_RUN_ON_SAVE
+        value: false
+      - key: STREAMLIT_SERVER_FILE_WATCHER_TYPE
+        value: none
+      - key: STREAMLIT_THEME_BASE
+        value: light
+      - key: CACHE_TTL
+        value: 300
+    healthCheckPath: /
+    autoDeploy: true
+
+# Performance optimizations
+build:
+  commands:
+    - echo "Optimizing build for speed..."
+    - pip install --upgrade pip setuptools wheel
+    - pip install -r requirements_fast.txt --no-cache-dir --no-deps
+    - echo "Fast build completed"
+
+# Health checks for faster startup
+healthCheck:
+  path: /
+  initialDelaySeconds: 15
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+  successThreshold: 1
