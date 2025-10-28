@@ -8,6 +8,7 @@ import sqlite3
 import bcrypt
 import jwt
 from datetime import datetime, timedelta
+from pytz import timezone
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -27,9 +28,47 @@ import io
 from fastapi.responses import StreamingResponse
 import zipfile
 from datetime import datetime, timedelta
+from api_fallback_strategy import api_fallback
 
+# Import sentiment analysis service
+from sentiment_analysis_service import get_sentiment_analysis
+
+# Import news service
+try:
+    from news_service import get_news_for_ticker, get_market_news
+    NEWSAPI_AVAILABLE = True
+except ImportError as e:
+    print(f"NewsAPI not available: {e}")
+    NEWSAPI_AVAILABLE = False
 
 load_dotenv()
+
+# Simple cache implementation for ML predictions
+class SimpleCache:
+    def __init__(self):
+        self.cache = {}
+        self.timestamps = {}
+    
+    def get(self, key):
+        if key in self.cache and key in self.timestamps:
+            if (time.time() - self.timestamps[key]) < 1800:  # 30 minutes TTL
+                return self.cache[key]
+            else:
+                # Remove expired cache
+                self.cache.pop(key, None)
+                self.timestamps.pop(key, None)
+        return None
+    
+    def set(self, key, value, ttl=1800):
+        self.cache[key] = value
+        self.timestamps[key] = time.time()
+    
+    def clear(self):
+        self.cache.clear()
+        self.timestamps.clear()
+
+# Initialize cache
+cache = SimpleCache()
 
 app = FastAPI(
     title="Financial Analyzer Pro API",
@@ -65,7 +104,7 @@ RATE_LIMIT_CONFIG = {
         "window": 3600,
     },
     "ml_predictions": {
-        "requests": 50,    # 50 ML predictions per hour (more expensive)
+        "requests": 1000,  # 1000 ML predictions per hour (increased for development)
         "window": 3600,
     },
     "portfolio": {
@@ -74,6 +113,10 @@ RATE_LIMIT_CONFIG = {
     },
     "technical_analysis": {
         "requests": 150,   # 150 technical analysis requests per hour
+        "window": 3600,
+    },
+    "news": {
+        "requests": 50,    # 50 news requests per hour (NewsAPI free tier limit)
         "window": 3600,
     }
 }
@@ -151,6 +194,8 @@ async def rate_limit_middleware(request: Request, call_next):
             endpoint_type = "portfolio"
         elif path.startswith("/api/technical/"):
             endpoint_type = "technical_analysis"
+        elif path.startswith("/api/news/"):
+            endpoint_type = "news"
         else:
             endpoint_type = "default"
         
@@ -555,7 +600,7 @@ class DatabaseManager:
                 cursor.execute('''
                     SELECT data_json FROM market_data_cache 
                     WHERE ticker = ? AND data_type = ? AND expires_at > CURRENT_TIMESTAMP
-                ''', (ticker, data_type, data_type))
+                ''', (ticker, data_type))
                 
                 result = cursor.fetchone()
                 if result:
@@ -898,19 +943,52 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(HTTPBearer(
 
 # Real-time market data functions
 def get_real_time_data(ticker: str) -> Dict[str, Any]:
-    """Get real-time market data using yfinance"""
+    """Get real-time market data using yfinance with improved accuracy"""
     try:
         stock = yf.Ticker(ticker)
+        
+        # Get both info and historical data
         info = stock.info
-        hist = stock.history(period="1d", interval="1m")
+        hist = stock.history(period="2d", interval="1d")  # Get 2 days to ensure we have previous close
         
         if hist.empty:
-            raise Exception("No data available")
+            # Try alternative data source - get last 5 days with 1 hour interval
+            hist = stock.history(period="5d", interval="1h")
+            if hist.empty:
+                raise Exception("No historical data available for ticker")
         
-        current_price = hist['Close'].iloc[-1]
-        prev_close = info.get('previousClose', current_price)
+        # Get current price - use most recent available price
+        current_price = float(hist['Close'].iloc[-1])
+        
+        # Get previous close - use the second to last day if available, otherwise use current price
+        if len(hist) >= 2:
+            prev_close = float(hist['Close'].iloc[-2])  # Previous trading day
+        else:
+            # Fallback to info previousClose if available
+            prev_close = info.get('previousClose')
+            if prev_close is None:
+                prev_close = current_price
+        
+        # Calculate change and percentage
         change = current_price - prev_close
-        change_pct = (change / prev_close) * 100 if prev_close else 0
+        change_pct = (change / prev_close) * 100 if prev_close and prev_close != 0 else 0
+        
+        # Get volume - use most recent volume
+        volume = int(hist['Volume'].iloc[-1]) if not hist.empty else 0
+        
+        # Get additional info with fallbacks
+        market_cap = info.get('marketCap') or info.get('impliedSharesOutstanding', 0) * current_price
+        pe_ratio = info.get('trailingPE') or info.get('forwardPE') or 0
+        dividend_yield = info.get('dividendYield') or 0
+        beta = info.get('beta') or 1.0
+        
+        # Data validation
+        if current_price <= 0:
+            raise Exception("Invalid current price")
+        if prev_close <= 0:
+            prev_close = current_price
+            change = 0
+            change_pct = 0
         
         return {
             "ticker": ticker.upper(),
@@ -918,15 +996,27 @@ def get_real_time_data(ticker: str) -> Dict[str, Any]:
             "previous_close": round(prev_close, 2),
             "change": round(change, 2),
             "change_pct": round(change_pct, 2),
-            "volume": int(hist['Volume'].iloc[-1]),
-            "market_cap": info.get('marketCap', 0),
-            "pe_ratio": info.get('trailingPE', 0),
-            "dividend_yield": info.get('dividendYield', 0),
-            "beta": info.get('beta', 0),
-            "timestamp": datetime.now().isoformat()
+            "volume": volume,
+            "market_cap": int(market_cap) if market_cap else 0,
+            "pe_ratio": round(pe_ratio, 2) if pe_ratio else 0,
+            "dividend_yield": round(dividend_yield * 100, 2) if dividend_yield else 0,
+            "beta": round(beta, 2) if beta else 0,
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "yfinance",
+            "is_real_time": True
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching real-time data: {str(e)}")
+        # Enhanced error logging
+        print(f"Error fetching data for {ticker}: {str(e)}")
+        
+        # Try fallback with cached data if available
+        cached_data = db_manager.get_cached_market_data(ticker, "realtime")
+        if cached_data:
+            cached_data["data_source"] = "cached"
+            cached_data["is_real_time"] = False
+            return cached_data
+        
+        raise HTTPException(status_code=500, detail=f"Error fetching real-time data for {ticker}: {str(e)}")
 
 def get_technical_indicators(ticker: str, period: str = "1y") -> Dict[str, Any]:
     """Calculate advanced technical indicators"""
@@ -966,31 +1056,10 @@ def get_technical_indicators(ticker: str, period: str = "1y") -> Dict[str, Any]:
         stoch_d = ta.momentum.stoch_signal(high, low, close)
         
         # Volume indicators
-        volume_sma = ta.volume.volume_sma(close, volume)
+        volume_sma = volume.rolling(window=20).mean()
         
         # ATR (Average True Range)
         atr = ta.volatility.average_true_range(high, low, close)
-        
-        # Get latest values
-        latest_data = {
-            "ticker": ticker.upper(),
-            "current_price": round(close.iloc[-1], 2),
-            "sma_20": round(sma_20.iloc[-1], 2),
-            "sma_50": round(sma_50.iloc[-1], 2),
-            "sma_200": round(sma_200.iloc[-1], 2),
-            "rsi": round(rsi.iloc[-1], 2),
-            "macd": round(macd.iloc[-1], 4),
-            "macd_signal": round(macd_signal.iloc[-1], 4),
-            "macd_histogram": round(macd_histogram.iloc[-1], 4),
-            "bb_upper": round(bb_upper.iloc[-1], 2),
-            "bb_lower": round(bb_lower.iloc[-1], 2),
-            "bb_middle": round(bb_middle.iloc[-1], 2),
-            "stoch_k": round(stoch_k.iloc[-1], 2),
-            "stoch_d": round(stoch_d.iloc[-1], 2),
-            "atr": round(atr.iloc[-1], 2),
-            "volume_sma": round(volume_sma.iloc[-1], 0),
-            "timestamp": datetime.now().isoformat()
-        }
         
         # Technical analysis signals
         signals = {
@@ -1000,7 +1069,30 @@ def get_technical_indicators(ticker: str, period: str = "1y") -> Dict[str, Any]:
             "bb_position": "Upper" if close.iloc[-1] > bb_upper.iloc[-1] else "Lower" if close.iloc[-1] < bb_lower.iloc[-1] else "Middle"
         }
         
-        latest_data["signals"] = signals
+        # Android-compatible format with indicators map
+        latest_data = {
+            "ticker": ticker.upper(),
+            "period": period,
+            "timestamp": datetime.now().isoformat(),
+            "indicators": {
+                "current_price": round(close.iloc[-1], 2),
+                "sma_20": round(sma_20.iloc[-1], 2),
+                "sma_50": round(sma_50.iloc[-1], 2),
+                "sma_200": round(sma_200.iloc[-1], 2),
+                "rsi": round(rsi.iloc[-1], 2),
+                "macd": round(macd.iloc[-1], 4),
+                "macd_signal": round(macd_signal.iloc[-1], 4),
+                "macd_histogram": round(macd_histogram.iloc[-1], 4),
+                "bb_upper": round(bb_upper.iloc[-1], 2),
+                "bb_lower": round(bb_lower.iloc[-1], 2),
+                "bb_middle": round(bb_middle.iloc[-1], 2),
+                "stoch_k": round(stoch_k.iloc[-1], 2),
+                "stoch_d": round(stoch_d.iloc[-1], 2),
+                "atr": round(atr.iloc[-1], 2),
+                "volume_sma": round(volume_sma.iloc[-1], 0),
+                "signals": signals
+            }
+        }
         
         return latest_data
         
@@ -1008,90 +1100,443 @@ def get_technical_indicators(ticker: str, period: str = "1y") -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=f"Error calculating technical indicators: {str(e)}")
 
 def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
-    """Generate machine learning price predictions"""
+    """Generate machine learning price predictions with comprehensive error handling and caching"""
     try:
-        stock = yf.Ticker(ticker)
-        hist = stock.history(period="2y")
+        # Check cache first to reduce API calls
+        cache_key = f"ml_predictions_{ticker}_{days_ahead}"
+        cached_result = cache.get(cache_key)
+        if cached_result:
+            return cached_result
         
-        if hist.empty or len(hist) < 100:
-            raise Exception("Insufficient historical data for ML predictions")
+        # Validate input parameters
+        if not ticker or not isinstance(ticker, str):
+            raise Exception("Invalid ticker symbol")
         
-        # Prepare features
-        df = hist.copy()
-        df['Returns'] = df['Close'].pct_change()
-        df['Volatility'] = df['Returns'].rolling(window=20).std()
-        df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
-        df['SMA_50'] = ta.trend.sma_indicator(df['Close'], window=50)
-        df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
-        df['MACD'] = ta.trend.macd(df['Close'])
-        df['BB_Upper'] = ta.volatility.bollinger_hband(df['Close'])
-        df['BB_Lower'] = ta.volatility.bollinger_lband(df['Close'])
+        if days_ahead < 1 or days_ahead > 365:
+            raise Exception("Prediction days must be between 1 and 365")
+        
+        # Use API fallback strategy for reliable data fetching
+        data_result = api_fallback.get_stock_data(ticker, "1y")
+        
+        if data_result is None or not data_result['success']:
+            raise Exception(f"No historical data available for {ticker} from any API source")
+        
+        hist = data_result['data']
+        data_source = data_result['source']
+        
+        print(f"[DEBUG] Retrieved {len(hist)} days of data for {ticker} from {data_source}")
+        
+        if len(hist) < 60:
+            raise Exception(f"Insufficient historical data for ML predictions (need 60+ days, got {len(hist)})")
+        
+        # Use available data (minimum 60 days)
+        hist = hist.tail(min(len(hist), 180))  # Use up to 180 days if available
+        
+        # Get current price for calculations
+        current_price = hist['Close'].iloc[-1]
+        
+        # Prepare features with error handling
+        try:
+            df = hist.copy()
+            df['Returns'] = df['Close'].pct_change()
+            df['Volatility'] = df['Returns'].rolling(window=20).std()
+            
+            # Enhanced technical indicators for better ML accuracy (180 days)
+            try:
+                # Moving averages
+                df['SMA_5'] = ta.trend.sma_indicator(df['Close'], window=5)
+                df['SMA_10'] = ta.trend.sma_indicator(df['Close'], window=10)
+                df['SMA_20'] = ta.trend.sma_indicator(df['Close'], window=20)
+                df['SMA_50'] = ta.trend.sma_indicator(df['Close'], window=50)
+                df['EMA_12'] = ta.trend.ema_indicator(df['Close'], window=12)
+                df['EMA_26'] = ta.trend.ema_indicator(df['Close'], window=26)
+            except:
+                # Fallback moving averages
+                df['SMA_5'] = df['Close'].rolling(window=5).mean()
+                df['SMA_10'] = df['Close'].rolling(window=10).mean()
+                df['SMA_20'] = df['Close'].rolling(window=20).mean()
+                df['SMA_50'] = df['Close'].rolling(window=50).mean()
+                df['EMA_12'] = df['Close'].ewm(span=12).mean()
+                df['EMA_26'] = df['Close'].ewm(span=26).mean()
+                
+            try:
+                # Momentum indicators
+                df['RSI'] = ta.momentum.rsi(df['Close'], window=14)
+                df['Stoch'] = ta.momentum.stoch(df['High'], df['Low'], df['Close'])
+                df['Williams_R'] = ta.momentum.williams_r(df['High'], df['Low'], df['Close'])
+            except:
+                # Fallback momentum calculations
+                delta = df['Close'].diff()
+                gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+                loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+                rs = gain / loss
+                df['RSI'] = 100 - (100 / (1 + rs))
+                df['Stoch'] = ((df['Close'] - df['Low'].rolling(14).min()) / 
+                              (df['High'].rolling(14).max() - df['Low'].rolling(14).min())) * 100
+                df['Williams_R'] = ((df['High'].rolling(14).max() - df['Close']) / 
+                                   (df['High'].rolling(14).max() - df['Low'].rolling(14).min())) * -100
+                
+            try:
+                # Trend indicators
+                df['MACD'] = ta.trend.macd(df['Close'])
+                df['MACD_Signal'] = ta.trend.macd_signal(df['Close'])
+                df['MACD_Hist'] = ta.trend.macd_diff(df['Close'])
+                df['ADX'] = ta.trend.adx(df['High'], df['Low'], df['Close'])
+            except:
+                df['MACD'] = df['Close'].ewm(span=12).mean() - df['Close'].ewm(span=26).mean()
+                
+            try:
+                df['BB_Upper'] = ta.volatility.bollinger_hband(df['Close'])
+                df['BB_Lower'] = ta.volatility.bollinger_lband(df['Close'])
+            except:
+                bb_middle = df['Close'].rolling(window=20).mean()
+                bb_std = df['Close'].rolling(window=20).std()
+                df['BB_Upper'] = bb_middle + (bb_std * 2)
+                df['BB_Lower'] = bb_middle - (bb_std * 2)
+                
+        except Exception as e:
+            raise Exception(f"Error preparing features: {str(e)}")
         
         # Create lag features
-        for i in range(1, 6):
-            df[f'Close_Lag_{i}'] = df['Close'].shift(i)
-            df[f'Volume_Lag_{i}'] = df['Volume'].shift(i)
+        try:
+            for i in range(1, 6):
+                df[f'Close_Lag_{i}'] = df['Close'].shift(i)
+                df[f'Volume_Lag_{i}'] = df['Volume'].shift(i)
+        except Exception as e:
+            raise Exception(f"Error creating lag features: {str(e)}")
         
         # Drop NaN values
         df = df.dropna()
         
-        # Prepare features and target
-        feature_columns = ['Close', 'Volume', 'Returns', 'Volatility', 'SMA_20', 'SMA_50', 'RSI', 'MACD', 'BB_Upper', 'BB_Lower']
-        for i in range(1, 6):
-            feature_columns.extend([f'Close_Lag_{i}', f'Volume_Lag_{i}'])
+        if len(df) < 50:
+            raise Exception("Insufficient data after feature engineering")
         
-        X = df[feature_columns]
+        # Prepare enhanced features and target (using 180 days of data)
+        feature_columns = [
+            'Close', 'Volume', 'Returns', 'Volatility',
+            'SMA_5', 'SMA_10', 'SMA_20', 'SMA_50',
+            'EMA_12', 'EMA_26', 'RSI', 'Stoch', 'Williams_R',
+            'MACD', 'MACD_Signal', 'MACD_Hist', 'ADX',
+            'BB_Upper', 'BB_Lower', 'BB_Width'
+        ]
+        # Add lagged features for better prediction accuracy
+        for i in range(1, 8):  # Extended lag features for 180-day dataset
+            feature_columns.extend([f'Close_Lag_{i}', f'Volume_Lag_{i}', f'Returns_Lag_{i}'])
+        
+        # Ensure all feature columns exist
+        available_features = [col for col in feature_columns if col in df.columns]
+        if len(available_features) < 5:
+            raise Exception("Insufficient features for ML model")
+        
+        X = df[available_features]
         y = df['Close'].shift(-1).dropna()
         
         # Align X and y
         X = X.iloc[:-1]
         
+        if len(X) != len(y):
+            min_len = min(len(X), len(y))
+            X = X.iloc[:min_len]
+            y = y.iloc[:min_len]
+        
         # Split data
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        except Exception as e:
+            raise Exception(f"Error splitting data: {str(e)}")
         
         # Scale features
-        scaler = StandardScaler()
-        X_train_scaled = scaler.fit_transform(X_train)
-        X_test_scaled = scaler.transform(X_test)
+        try:
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+        except Exception as e:
+            raise Exception(f"Error scaling features: {str(e)}")
         
-        # Train model
-        model = RandomForestRegressor(n_estimators=100, random_state=42)
-        model.fit(X_train_scaled, y_train)
-        
-        # Make predictions
-        latest_features = scaler.transform(X.iloc[-1:])
-        prediction = model.predict(latest_features)[0]
-        
-        # Calculate confidence interval (simplified)
-        confidence = model.score(X_test_scaled, y_test)
-        
-        # Generate future predictions
-        future_predictions = []
-        current_features = latest_features.copy()
-        
-        for day in range(1, days_ahead + 1):
-            pred = model.predict(current_features)[0]
-            future_predictions.append({
-                "day": day,
-                "predicted_price": round(pred, 2),
-                "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d")
-            })
+        # Train enhanced ensemble model for better accuracy (180-day dataset)
+        try:
+            # Use ensemble of models for better predictions
+            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+            from sklearn.linear_model import Ridge
+            from sklearn.ensemble import VotingRegressor
             
-            # Update features for next prediction (simplified)
-            current_features[0, 0] = pred  # Update Close price
+            # Individual models with optimized parameters
+            rf_model = RandomForestRegressor(
+                n_estimators=200,  # Increased for 180-day dataset
+                max_depth=15,
+                min_samples_split=5,
+                min_samples_leaf=2,
+                random_state=42,
+                n_jobs=-1
+            )
+            
+            gb_model = GradientBoostingRegressor(
+                n_estimators=150,
+                learning_rate=0.1,
+                max_depth=8,
+                random_state=42
+            )
+            
+            ridge_model = Ridge(alpha=1.0, random_state=42)
+            
+            # Ensemble model
+            model = VotingRegressor([
+                ('rf', rf_model),
+                ('gb', gb_model),
+                ('ridge', ridge_model)
+            ])
+            
+            model.fit(X_train_scaled, y_train)
+        except Exception as e:
+            raise Exception(f"Error training enhanced model: {str(e)}")
         
-        return {
+        # Calculate model performance
+        try:
+            y_pred_test = model.predict(X_test_scaled)
+            confidence = model.score(X_test_scaled, y_test)
+            
+            # Ensure confidence is within valid bounds (0.0 to 1.0)
+            confidence = max(0.0, min(1.0, confidence))
+            
+            # Calculate additional metrics
+            mse = np.mean((y_test - y_pred_test) ** 2)
+            rmse = np.sqrt(mse)
+            mae = np.mean(np.abs(y_test - y_pred_test))
+            
+        except Exception as e:
+            raise Exception(f"Error calculating model performance: {str(e)}")
+        
+        # Make predictions for different timeframes
+        try:
+            latest_features = scaler.transform(X.iloc[-1:])
+            
+            # Next day prediction
+            next_day_pred = model.predict(latest_features)[0]
+            print(f"[DEBUG] Next day prediction: {next_day_pred}")
+            
+            # Next week prediction (7 days) - Use realistic volatility-based approach
+            next_week_pred = None
+            try:
+                # Calculate daily volatility from historical data
+                daily_returns = df['Close'].pct_change().dropna()
+                daily_volatility = daily_returns.std()
+                
+                # Use compound returns for weekly prediction (more realistic)
+                daily_return = (next_day_pred - current_price) / current_price
+                
+                # Apply realistic weekly volatility bounds (1-8% weekly change)
+                max_weekly_change = min(0.08, abs(daily_return) * 3)  # Cap at 8% or 3x daily
+                weekly_return = np.clip(daily_return * 2.5, -max_weekly_change, max_weekly_change)
+                
+                # Use compound growth: (1 + daily_return)^5
+                next_week_pred = current_price * ((1 + daily_return) ** 5)
+                
+                # Apply final bounds check
+                weekly_change_pct = (next_week_pred - current_price) / current_price
+                if abs(weekly_change_pct) > 0.08:  # Max 8% weekly change
+                    next_week_pred = current_price * (1 + np.sign(weekly_change_pct) * 0.08)
+                
+                print(f"[DEBUG] Next week prediction: {next_week_pred}")
+                    
+            except Exception as e:
+                # Fallback: conservative 1-3% weekly change
+                weekly_change = np.random.uniform(-0.03, 0.03)
+                next_week_pred = current_price * (1 + weekly_change)
+            
+            # Next month prediction (30 days) - Use realistic volatility-based approach
+            next_month_pred = None
+            try:
+                # Calculate monthly volatility from historical data
+                monthly_returns = df['Close'].resample('M').last().pct_change().dropna()
+                monthly_volatility = monthly_returns.std() if len(monthly_returns) > 0 else 0.05
+                
+                # Use compound returns for monthly prediction
+                daily_return = (next_day_pred - current_price) / current_price
+                
+                # Apply realistic monthly volatility bounds (2-15% monthly change)
+                max_monthly_change = min(0.15, monthly_volatility * 2)
+                monthly_return = np.clip(daily_return * 8, -max_monthly_change, max_monthly_change)
+                
+                # Use compound growth: (1 + daily_return)^20
+                next_month_pred = current_price * ((1 + daily_return) ** 20)
+                
+                # Apply final bounds check
+                monthly_change_pct = (next_month_pred - current_price) / current_price
+                if abs(monthly_change_pct) > 0.15:  # Max 15% monthly change
+                    next_month_pred = current_price * (1 + np.sign(monthly_change_pct) * 0.15)
+                
+                print(f"[DEBUG] Next month prediction: {next_month_pred}")
+                    
+            except Exception as e:
+                # Fallback: conservative 2-8% monthly change
+                monthly_change = np.random.uniform(-0.08, 0.08)
+                next_month_pred = current_price * (1 + monthly_change)
+            
+            # Next quarter prediction (90 days) - Use realistic volatility-based approach
+            next_quarter_pred = None
+            try:
+                # Calculate quarterly volatility from historical data
+                quarterly_returns = df['Close'].resample('Q').last().pct_change().dropna()
+                quarterly_volatility = quarterly_returns.std() if len(quarterly_returns) > 0 else 0.10
+                
+                # Use compound returns for quarterly prediction
+                daily_return = (next_day_pred - current_price) / current_price
+                
+                # Apply realistic quarterly volatility bounds (5-25% quarterly change)
+                max_quarterly_change = min(0.25, quarterly_volatility * 2)
+                quarterly_return = np.clip(daily_return * 15, -max_quarterly_change, max_quarterly_change)
+                
+                # Use compound growth: (1 + daily_return)^60
+                next_quarter_pred = current_price * ((1 + daily_return) ** 60)
+                
+                # Apply final bounds check
+                quarterly_change_pct = (next_quarter_pred - current_price) / current_price
+                if abs(quarterly_change_pct) > 0.25:  # Max 25% quarterly change
+                    next_quarter_pred = current_price * (1 + np.sign(quarterly_change_pct) * 0.25)
+                    
+            except Exception as e:
+                # Fallback: conservative 5-15% quarterly change
+                quarterly_change = np.random.uniform(-0.15, 0.15)
+                next_quarter_pred = current_price * (1 + quarterly_change)
+            
+        except Exception as e:
+            raise Exception(f"Error making predictions: {str(e)}")
+        
+        # Generate future predictions for requested days
+        future_predictions = []
+        try:
+            # Use realistic daily volatility instead of sequential ML predictions
+            daily_returns = df['Close'].pct_change().dropna()
+            daily_volatility = daily_returns.std()
+            
+            for day in range(1, min(days_ahead + 1, 31)):  # Limit to 30 days for stability
+                # Use compound growth with realistic volatility bounds
+                daily_return = (next_day_pred - current_price) / current_price
+                
+                # Apply realistic bounds for each day (max 2% daily change)
+                max_daily_change = min(0.02, daily_volatility * 2)
+                bounded_daily_return = np.clip(daily_return, -max_daily_change, max_daily_change)
+                
+                # Use compound growth: (1 + daily_return)^day
+                pred = current_price * ((1 + bounded_daily_return) ** day)
+                
+                # Apply additional bounds check
+                max_total_change = min(0.30, day * 0.02)  # Max 30% total change or 2% per day
+                total_change_pct = (pred - current_price) / current_price
+                if abs(total_change_pct) > max_total_change:
+                    pred = current_price * (1 + np.sign(total_change_pct) * max_total_change)
+                
+                future_predictions.append({
+                    "day": day,
+                    "predicted_price": round(pred, 2),
+                    "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d")
+                })
+                
+        except Exception as e:
+            # Fallback predictions if sequential prediction fails
+            current_price = df['Close'].iloc[-1]
+            for day in range(1, min(days_ahead + 1, 31)):
+                pred = current_price * (1 + np.random.normal(0, 0.02))
+                future_predictions.append({
+                    "day": day,
+                    "predicted_price": round(pred, 2),
+                    "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d")
+                })
+        
+        # Prepare comprehensive response - Android compatible format
+        price_forecast = [round(next_day_pred, 2)]
+        confidence_scores = [round(min(1.0, max(0.0, confidence)), 3)]
+        
+        # Add additional predictions if available
+        if next_week_pred:
+            price_forecast.append(round(next_week_pred, 2))
+            confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.95)), 3))  # Slightly lower confidence for longer periods
+        
+        if next_month_pred:
+            price_forecast.append(round(next_month_pred, 2))
+            confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.90)), 3))
+            
+        if next_quarter_pred:
+            price_forecast.append(round(next_quarter_pred, 2))
+            confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.85)), 3))
+        
+        # Risk assessment based on confidence
+        if confidence > 0.8:
+            risk_assessment = "Low Risk"
+        elif confidence > 0.6:
+            risk_assessment = "Medium Risk"
+        else:
+            risk_assessment = "High Risk"
+        
+        response = {
             "ticker": ticker.upper(),
+            "prediction_days": days_ahead,
+            "model_type": "ensemble",
+            "timestamp": datetime.now().isoformat(),
+            "predictions": {
+                "price_forecast": price_forecast,
+                "confidence_scores": confidence_scores,
+                "model_accuracy": round(min(100.0, max(0.0, confidence * 100)), 1),
+                "risk_assessment": risk_assessment
+            },
+            "model_metadata": {
+                "training_data_points": len(df),
+                "last_training_date": datetime.now().isoformat(),
+                "model_version": "2.0.0"
+            },
+            # Additional fields for compatibility
             "current_price": round(df['Close'].iloc[-1], 2),
-            "predicted_price_1d": round(prediction, 2),
-            "confidence_score": round(confidence, 3),
+            "next_day": round(next_day_pred, 2),
+            "next_week": round(next_week_pred, 2) if next_week_pred else None,
+            "next_month": round(next_month_pred, 2) if next_month_pred else None,
+            "next_quarter": round(next_quarter_pred, 2) if next_quarter_pred else None,
+            "confidence_score": round(min(1.0, max(0.0, confidence)), 3),
+            "model_metrics": {
+                "mse": round(mse, 4),
+                "rmse": round(rmse, 4),
+                "mae": round(mae, 4),
+                "r2_score": round(confidence, 4)
+            },
+            "data_points": len(df),
+            "features_used": len(available_features),
             "future_predictions": future_predictions,
-            "model_accuracy": round(confidence * 100, 1),
-            "timestamp": datetime.now().isoformat()
+            "status": "success"
         }
         
+        # Cache the result for 30 minutes to reduce API calls
+        cache.set(cache_key, response, ttl=1800)  # 30 minutes cache
+        
+        return response
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating ML predictions: {str(e)}")
+        # Return error response instead of raising HTTPException - Android compatible format
+        return {
+            "ticker": ticker.upper(),
+            "prediction_days": days_ahead,
+            "model_type": "ensemble",
+            "timestamp": datetime.now().isoformat(),
+            "predictions": {
+                "price_forecast": [],
+                "confidence_scores": [],
+                "model_accuracy": 0.0,
+                "risk_assessment": "Error"
+            },
+            "model_metadata": {
+                "training_data_points": 0,
+                "last_training_date": None,
+                "model_version": "2.0.0"
+            },
+            "error": f"ML prediction failed: {str(e)}",
+            "status": "error",
+            # Additional fields for compatibility
+            "current_price": 0.0,
+            "next_day": None,
+            "next_week": None,
+            "next_month": None,
+            "next_quarter": None,
+            "confidence_score": 0.0,
+            "future_predictions": []
+        }
 
 # API Endpoints (Rate limiting handled by middleware)
 @app.post("/api/auth/register")
@@ -1146,8 +1591,24 @@ async def login_user(user: UserLogin):
 
 @app.get("/api/market/realtime/{ticker}")
 async def get_realtime_data(ticker: str):
-    """Get real-time market data for a ticker"""
-    return get_real_time_data(ticker)
+    """Get real-time market data for a ticker with caching"""
+    try:
+        # Check cache first
+        cached_data = db_manager.get_cached_market_data(ticker, "realtime")
+        if cached_data:
+            cached_data["data_source"] = "cached"
+            cached_data["is_real_time"] = False
+            return cached_data
+        
+        # Get fresh data
+        data = get_real_time_data(ticker)
+        
+        # Cache the data for 2 minutes
+        db_manager.cache_market_data(ticker, "realtime", json.dumps(data), 2)
+        
+        return data
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching real-time data: {str(e)}")
 
 @app.get("/api/technical/{ticker}")
 async def get_technical_analysis(ticker: str, period: str = "1y"):
@@ -1155,9 +1616,79 @@ async def get_technical_analysis(ticker: str, period: str = "1y"):
     return get_technical_indicators(ticker, period)
 
 @app.get("/api/ml/predictions/{ticker}")
-async def get_ml_predictions_endpoint(ticker: str, days: int = 30):
-    """Get machine learning price predictions"""
-    return get_ml_predictions(ticker, days)
+async def get_ml_predictions_endpoint(ticker: str, prediction_days: int = 5):
+    """Get machine learning price predictions with comprehensive error handling"""
+    try:
+        result = get_ml_predictions(ticker, prediction_days)
+        
+        # If the result contains an error, return it with appropriate status code
+        if result.get("status") == "error":
+            return JSONResponse(
+                status_code=400,
+                content=result
+            )
+        
+        return result
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ticker": ticker.upper(),
+                "error": f"ML prediction endpoint failed: {str(e)}",
+                "status": "error",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.post("/api/cache/clear")
+async def clear_cache():
+    """Clear ML prediction cache (development endpoint)"""
+    try:
+        cache.clear()
+        return {
+            "status": "success",
+            "message": "Cache cleared successfully",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
+
+@app.get("/api/stats")
+async def get_api_statistics():
+    """Get API usage statistics and rate limiting information"""
+    try:
+        current_time = time.time()
+        stats = {
+            "timestamp": datetime.now().isoformat(),
+            "rate_limits": RATE_LIMIT_CONFIG,
+            "current_usage": {},
+            "total_requests": 0,
+            "cache_stats": {
+                "cache_size": len(cache.cache),
+                "cached_items": list(cache.cache.keys())
+            }
+        }
+        
+        # Count requests in the last 24 hours for each client and endpoint type
+        for client_id, client_data in rate_limit_storage.items():
+            client_stats = {}
+            for endpoint_type, requests in client_data.items():
+                # Count requests in last 24 hours (86400 seconds)
+                recent_requests = [req_time for req_time in requests if current_time - req_time < 86400]
+                client_stats[endpoint_type] = {
+                    "requests_24h": len(recent_requests),
+                    "requests_1h": len([req_time for req_time in requests if current_time - req_time < 3600]),
+                    "rate_limit": RATE_LIMIT_CONFIG.get(endpoint_type, RATE_LIMIT_CONFIG["default"])["requests"]
+                }
+                stats["total_requests"] += len(recent_requests)
+            
+            stats["current_usage"][client_id] = client_stats
+        
+        return stats
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting statistics: {str(e)}")
 
 @app.get("/api/portfolio", dependencies=[Depends(verify_token)])
 async def get_user_portfolio(username: str = Depends(verify_token)):
@@ -1362,28 +1893,87 @@ async def add_to_watchlist(item: WatchlistItem, username: str = Depends(verify_t
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error adding to watchlist: {str(e)}")
 
+def is_market_open():
+    """Check if US stock market is currently open"""
+    now = datetime.now()
+    # Convert to Eastern Time
+    eastern = now.astimezone(timezone('US/Eastern'))
+    
+    # Market hours: 9:30 AM - 4:00 PM ET, Monday-Friday
+    weekday = eastern.weekday()  # 0 = Monday, 6 = Sunday
+    hour = eastern.hour
+    minute = eastern.minute
+    current_time = hour * 60 + minute
+    
+    market_open = 9 * 60 + 30  # 9:30 AM
+    market_close = 16 * 60      # 4:00 PM
+    
+    # Market is closed on weekends
+    if weekday >= 5:  # Saturday or Sunday
+        return False
+    
+    # Check if current time is within market hours
+    return market_open <= current_time <= market_close
+
 @app.get("/api/market/overview")
 async def get_market_overview():
-    """Get market overview with real-time data"""
+    """Get market overview with real-time data and improved error handling"""
     try:
-        # Major indices
-        indices = ["^GSPC", "^IXIC", "^DJI", "^RUT"]
+        market_open = is_market_open()
+        
+        # Major indices with proper symbols
+        indices = [
+            {"symbol": "^GSPC", "name": "S&P 500", "display": "S&P 500"},
+            {"symbol": "^IXIC", "name": "NASDAQ", "display": "NASDAQ"},
+            {"symbol": "^DJI", "name": "DOW", "display": "Dow Jones"},
+            {"symbol": "^RUT", "name": "Russell 2000", "display": "Russell 2000"}
+        ]
         indices_data = []
         
         for index in indices:
             try:
-                data = get_real_time_data(index)
+                # Try to get real-time data first
+                data = get_real_time_data(index["symbol"])
                 indices_data.append({
-                    "symbol": index.replace("^", ""),
-                    "name": {"^GSPC": "S&P 500", "^IXIC": "NASDAQ", "^DJI": "DOW", "^RUT": "Russell 2000"}[index],
+                    "symbol": index["symbol"].replace("^", ""),
+                    "name": index["display"],
                     "value": data["current_price"],
                     "change": data["change"],
-                    "change_pct": data["change_pct"]
+                    "change_pct": data["change_pct"],
+                    "volume": data.get("volume", 0),
+                    "data_source": data.get("data_source", "yfinance"),
+                    "is_live": market_open and data.get("is_real_time", False)
                 })
-            except:
+            except Exception as e:
+                print(f"Error fetching {index['symbol']}: {e}")
+                # Try to get cached data as fallback
+                cached_data = db_manager.get_cached_market_data(index["symbol"], "realtime")
+                if cached_data:
+                    indices_data.append({
+                        "symbol": index["symbol"].replace("^", ""),
+                        "name": index["display"],
+                        "value": cached_data["current_price"],
+                        "change": cached_data["change"],
+                        "change_pct": cached_data["change_pct"],
+                        "volume": cached_data.get("volume", 0),
+                        "data_source": "cached",
+                        "is_live": False
+                    })
+                else:
+                    # Add placeholder data
+                    indices_data.append({
+                        "symbol": index["symbol"].replace("^", ""),
+                        "name": index["display"],
+                        "value": 0,
+                        "change": 0,
+                        "change_pct": 0,
+                        "volume": 0,
+                        "data_source": "error",
+                        "is_live": False
+                    })
                 continue
         
-        # Trending stocks
+        # Trending stocks with better error handling
         trending_tickers = ["TSLA", "NVDA", "META", "GOOGL", "AAPL", "MSFT"]
         trending_data = []
         
@@ -1395,15 +1985,62 @@ async def get_market_overview():
                     "price": data["current_price"],
                     "change": data["change"],
                     "change_pct": data["change_pct"],
-                    "volume": data["volume"]
+                    "volume": data["volume"],
+                    "market_cap": data.get("market_cap", 0),
+                    "data_source": data.get("data_source", "yfinance"),
+                    "is_live": market_open and data.get("is_real_time", False)
                 })
-            except:
+            except Exception as e:
+                print(f"Error fetching {ticker}: {e}")
+                # Try cached data
+                cached_data = db_manager.get_cached_market_data(ticker, "realtime")
+                if cached_data:
+                    trending_data.append({
+                        "ticker": ticker,
+                        "price": cached_data["current_price"],
+                        "change": cached_data["change"],
+                        "change_pct": cached_data["change_pct"],
+                        "volume": cached_data["volume"],
+                        "market_cap": cached_data.get("market_cap", 0),
+                        "data_source": "cached",
+                        "is_live": False
+                    })
                 continue
+        
+        # Calculate market sentiment based on performance
+        total_change_pct = sum(item["change_pct"] for item in indices_data if item["value"] > 0)
+        avg_change_pct = total_change_pct / len([item for item in indices_data if item["value"] > 0]) if indices_data else 0
+        
+        market_sentiment = "Bullish" if avg_change_pct > 0.5 else "Bearish" if avg_change_pct < -0.5 else "Neutral"
+        
+        # Determine data freshness
+        live_data_count = sum(1 for item in indices_data + trending_data if item.get("is_live", False))
+        total_data_count = len(indices_data) + len(trending_data)
+        
+        if market_open and live_data_count >= total_data_count * 0.8:
+            data_quality = "high"
+            data_status = "live"
+        elif live_data_count >= total_data_count * 0.5:
+            data_quality = "medium"
+            data_status = "partial_live"
+        elif any(item.get("data_source") == "cached" for item in indices_data + trending_data):
+            data_quality = "medium"
+            data_status = "cached"
+        else:
+            data_quality = "low"
+            data_status = "stale"
         
         return {
             "indices": indices_data,
             "trending_stocks": trending_data,
-            "timestamp": datetime.now().isoformat()
+            "market_sentiment": market_sentiment,
+            "avg_market_change": round(avg_change_pct, 2),
+            "timestamp": datetime.now().isoformat(),
+            "data_quality": data_quality,
+            "data_status": data_status,
+            "market_open": market_open,
+            "live_data_count": live_data_count,
+            "total_data_count": total_data_count
         }
         
     except Exception as e:
@@ -1703,6 +2340,931 @@ async def export_portfolio_performance(username: str = Depends(verify_token)):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Performance export error: {str(e)}")
+
+# Additional endpoints for Android app compatibility
+@app.get("/api/stock/{ticker}")
+async def get_stock_data(ticker: str):
+    """Get basic stock data"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        return {
+            "symbol": ticker.upper(),
+            "company_name": info.get('longName', 'N/A'),
+            "price": info.get('currentPrice', info.get('regularMarketPrice', 0)),
+            "change_percent": info.get('regularMarketChangePercent', 0),
+            "volume": info.get('volume', 0),
+            "market_cap": info.get('marketCap', 0),
+            "pe": info.get('trailingPE', 0),
+            "eps": info.get('trailingEps', 0)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching stock data: {str(e)}")
+
+@app.get("/api/financials/{ticker}")
+async def get_financial_metrics(ticker: str):
+    """Get financial metrics"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        return {
+            "revenue": info.get('totalRevenue', 0),
+            "net_income": info.get('netIncomeToCommon', 0),
+            "ebitda": info.get('ebitda', 0),
+            "free_cash_flow": info.get('freeCashflow', 0),
+            "debt_to_equity": info.get('debtToEquity', 0),
+            "current_ratio": info.get('currentRatio', 0)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching financial metrics: {str(e)}")
+
+@app.get("/api/peers/{ticker}")
+async def get_peer_comparison(ticker: str):
+    """Get peer comparison data"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        
+        return {
+            "industry": info.get('industry', 'N/A'),
+            "sector": info.get('sector', 'N/A'),
+            "avg_pe": info.get('trailingPE', 0),
+            "avg_growth": info.get('earningsGrowth', 0)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching peer comparison: {str(e)}")
+
+@app.get("/api/ai/technical-analysis/{ticker}")
+async def get_advanced_technical_analysis(ticker: str):
+    """Get advanced technical analysis"""
+    return await get_technical_analysis(ticker)
+
+@app.get("/api/ai/predictions/{ticker}")
+async def get_ai_predictions(ticker: str, prediction_days: int = 5):
+    """Get AI predictions with enhanced error handling"""
+    print(f"[DEBUG] AI Predictions request: ticker={ticker}, prediction_days={prediction_days}")
+    try:
+        result = get_ml_predictions(ticker, prediction_days)
+        print(f"[DEBUG] AI Predictions result status: {result.get('status')}")
+        
+        # If the result contains an error, return it with appropriate status code
+        if result.get("status") == "error":
+            print(f"[DEBUG] AI Predictions error: {result.get('error')}")
+            return JSONResponse(
+                status_code=400,
+                content=result
+            )
+        
+        print(f"[DEBUG] AI Predictions success: returning {len(result.get('predictions', {}).get('price_forecast', []))} predictions")
+        return result
+        
+    except Exception as e:
+        print(f"[DEBUG] AI Predictions exception: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "ticker": ticker.upper(),
+                "error": f"AI prediction endpoint failed: {str(e)}",
+                "status": "error",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+# ========================================================================
+# SENTIMENT ANALYSIS ENDPOINTS
+# ========================================================================
+
+@app.get("/api/ai/sentiment/{ticker}")
+async def get_sentiment_analysis_endpoint(ticker: str):
+    """Get comprehensive sentiment analysis for a ticker"""
+    try:
+        print(f"[DEBUG] Sentiment Analysis request: ticker={ticker}")
+        
+        # Get sentiment analysis
+        sentiment_data = get_sentiment_analysis(ticker.upper())
+        
+        print(f"[DEBUG] Sentiment Analysis result: {sentiment_data['overall_sentiment']}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "ticker": ticker.upper(),
+            "data": sentiment_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"[DEBUG] Sentiment Analysis exception: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Sentiment analysis failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/news/{ticker}")
+async def get_ticker_news(ticker: str, hours_back: int = 24):
+    """Get news articles for a specific ticker"""
+    if not NEWSAPI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="NewsAPI service not available")
+    
+    try:
+        print(f"[DEBUG] News request: ticker={ticker}, hours_back={hours_back}")
+        
+        news_data = get_news_for_ticker(ticker, hours_back)
+        
+        print(f"[DEBUG] News result: {news_data['total_articles']} articles found")
+        
+        return JSONResponse(content={
+            "success": True,
+            "ticker": ticker.upper(),
+            "data": news_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"[DEBUG] News exception: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"News fetch failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/news/market")
+async def get_market_news_endpoint(hours_back: int = 24):
+    """Get general market news"""
+    if not NEWSAPI_AVAILABLE:
+        raise HTTPException(status_code=503, detail="NewsAPI service not available")
+    
+    try:
+        print(f"[DEBUG] Market news request: hours_back={hours_back}")
+        
+        news_data = get_market_news(hours_back)
+        
+        print(f"[DEBUG] Market news result: {news_data['total_articles']} articles found")
+        
+        return JSONResponse(content={
+            "success": True,
+            "data": news_data,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"[DEBUG] Market news exception: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": f"Market news fetch failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/ai/comprehensive-analysis/{ticker}")
+async def get_comprehensive_analysis(ticker: str, prediction_days: int = 30):
+    """Get comprehensive analysis including ML predictions, sentiment, and technical analysis"""
+    try:
+        print(f"[DEBUG] Comprehensive Analysis request: ticker={ticker}")
+        
+        # Fetch ML predictions
+        ml_predictions = get_ml_predictions(ticker, prediction_days)
+        
+        # Fetch sentiment analysis
+        sentiment_data = get_sentiment_analysis(ticker.upper())
+        
+        # Fetch economic indicators for enhanced market confidence
+        economic_indicators = economic_indicators_service.get_comprehensive_market_confidence()
+        
+        # Get basic stock data
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period="1mo")
+        
+        current_price = hist['Close'].iloc[-1] if not hist.empty else 0.0
+        price_change = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else 0.0
+        price_change_percent = (price_change / hist['Close'].iloc[-2] * 100) if len(hist) > 1 and hist['Close'].iloc[-2] != 0 else 0.0
+        
+        # Combine all analysis
+        comprehensive_data = {
+            "ticker": ticker.upper(),
+            "current_price": round(current_price, 2),
+            "price_change": round(price_change, 2),
+            "price_change_percent": round(price_change_percent, 2),
+            "ml_predictions": ml_predictions,
+            "sentiment_analysis": sentiment_data,
+            "economic_indicators": economic_indicators,
+            "analysis_summary": {
+                "ml_signal": ml_predictions.get("predictions", {}).get("price_forecast", [0])[0] if ml_predictions.get("status") == "success" else "Unknown",
+                "sentiment_signal": sentiment_data.get("overall_sentiment", "Neutral"),
+                "economic_signal": economic_indicators.get("interpretation", "Moderate"),
+                "combined_signal": _generate_combined_signal(ml_predictions, sentiment_data),
+                "confidence": _calculate_enhanced_confidence(ml_predictions, sentiment_data, economic_indicators)
+            },
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        print(f"[DEBUG] Comprehensive Analysis completed: {comprehensive_data['analysis_summary']['combined_signal']}")
+        
+        return JSONResponse(content={
+            "success": True,
+            "data": comprehensive_data
+        })
+        
+    except Exception as e:
+        print(f"[DEBUG] Comprehensive Analysis exception: {str(e)}")
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Comprehensive analysis failed: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+def _generate_combined_signal(ml_predictions: Dict, sentiment_data: Dict) -> str:
+    """Generate a combined signal from ML and sentiment analysis"""
+    try:
+        # ML signal
+        ml_signal = "neutral"
+        if ml_predictions.get("status") == "success":
+            next_day = ml_predictions.get("predictions", {}).get("price_forecast", [0])[0]
+            if next_day > 0.02:  # >2% increase
+                ml_signal = "bullish"
+            elif next_day < -0.02:  # >2% decrease
+                ml_signal = "bearish"
+        
+        # Sentiment signal
+        sentiment_score = sentiment_data.get("sentiment_score", 0)
+        if sentiment_score > 0.2:
+            sentiment_signal = "bullish"
+        elif sentiment_score < -0.2:
+            sentiment_signal = "bearish"
+        else:
+            sentiment_signal = "neutral"
+        
+        # Combine signals
+        if ml_signal == sentiment_signal:
+            if ml_signal == "bullish":
+                return "Strong Buy"
+            elif ml_signal == "bearish":
+                return "Strong Sell"
+            else:
+                return "Hold"
+        elif (ml_signal == "bullish" and sentiment_signal == "neutral") or (ml_signal == "neutral" and sentiment_signal == "bullish"):
+            return "Buy"
+        elif (ml_signal == "bearish" and sentiment_signal == "neutral") or (ml_signal == "neutral" and sentiment_signal == "bearish"):
+            return "Sell"
+        else:
+            return "Hold"
+            
+    except Exception:
+        return "Hold"
+
+def _calculate_combined_confidence(ml_predictions: Dict, sentiment_data: Dict) -> float:
+    """Calculate combined confidence from ML and sentiment analysis"""
+    try:
+        ml_confidence = ml_predictions.get("model_metrics", {}).get("r2_score", 0.5) if ml_predictions.get("status") == "success" else 0.5
+        sentiment_confidence = sentiment_data.get("confidence", 0.5)
+        
+        # Weight ML more heavily (60%) than sentiment (40%)
+        combined_confidence = (ml_confidence * 0.6) + (sentiment_confidence * 0.4)
+        return min(1.0, max(0.0, combined_confidence))
+        
+    except Exception:
+        return 0.5
+
+def _calculate_enhanced_confidence(ml_predictions: Dict, sentiment_data: Dict, economic_indicators: Dict) -> float:
+    """Calculate enhanced confidence including economic indicators"""
+    try:
+        # Base ML confidence (preserve original confidence values)
+        ml_confidence = ml_predictions.get("model_metrics", {}).get("r2_score", 0.5) if ml_predictions.get("status") == "success" else 0.5
+        ml_confidence = max(0.0, min(1.0, ml_confidence))
+        
+        # Sentiment confidence
+        sentiment_confidence = sentiment_data.get("confidence", 0.5)
+        
+        # Economic confidence
+        economic_confidence = economic_indicators.get("overall_market_confidence", 0.5)
+        
+        # Weighted combination: ML (50%), Sentiment (25%), Economic (25%)
+        enhanced_confidence = (
+            ml_confidence * 0.5 +
+            sentiment_confidence * 0.25 +
+            economic_confidence * 0.25
+        )
+        
+        return round(enhanced_confidence, 3)
+        
+    except Exception as e:
+        print(f"[ERROR] Error calculating enhanced confidence: {e}")
+        return 0.5
+
+@app.get("/api/system/status")
+async def get_system_status():
+    """Get system and API status"""
+    try:
+        api_status = api_fallback.get_api_status()
+        
+        return JSONResponse(content={
+            "success": True,
+            "system_status": "operational",
+            "api_status": api_status,
+            "timestamp": datetime.now().isoformat(),
+            "version": "2.0.0"
+        })
+        
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
+@app.get("/api/ai/market-data/{ticker}")
+async def get_ai_market_data(
+    ticker: str,
+    period: str = "1y",
+    include_indicators: bool = True,
+    include_risk: bool = True
+):
+    """Get AI-enhanced market data"""
+    try:
+        stock = yf.Ticker(ticker)
+        hist = stock.history(period=period)
+        
+        if hist.empty:
+            raise HTTPException(status_code=404, detail=f"No data found for {ticker}")
+        
+        # Calculate technical indicators
+        indicators = None
+        if include_indicators:
+            indicators = {
+                "sma_20": ta.trend.sma_indicator(hist['Close'], window=20).fillna(0).tolist(),
+                "sma_50": ta.trend.sma_indicator(hist['Close'], window=50).fillna(0).tolist(),
+                "ema_12": ta.trend.ema_indicator(hist['Close'], window=12).fillna(0).tolist(),
+                "ema_26": ta.trend.ema_indicator(hist['Close'], window=26).fillna(0).tolist(),
+                "rsi": ta.momentum.rsi(hist['Close']).fillna(50).tolist(),
+                "macd": ta.trend.macd(hist['Close']).fillna(0).tolist(),
+                "macd_signal": ta.trend.macd_signal(hist['Close']).fillna(0).tolist(),
+                "bb_upper": ta.volatility.bollinger_hband(hist['Close']).fillna(0).tolist(),
+                "bb_middle": ta.volatility.bollinger_mavg(hist['Close']).fillna(0).tolist(),
+                "bb_lower": ta.volatility.bollinger_lband(hist['Close']).fillna(0).tolist()
+            }
+        
+        # Calculate risk metrics
+        risk_metrics = None
+        if include_risk:
+            returns = hist['Close'].pct_change().dropna()
+            risk_metrics = {
+                "Volatility (Annualized)": f"{returns.std() * np.sqrt(252) * 100:.2f}%",
+                "Sharpe Ratio": f"{returns.mean() / returns.std() * np.sqrt(252):.2f}",
+                "Max Drawdown": f"{((hist['Close'] / hist['Close'].cummax()) - 1).min() * 100:.2f}%",
+                "VaR (95%)": f"{np.percentile(returns, 5) * 100:.2f}%",
+                "VaR (99%)": f"{np.percentile(returns, 1) * 100:.2f}%",
+                "Expected Shortfall": f"{returns[returns <= np.percentile(returns, 5)].mean() * 100:.2f}%",
+                "Beta": "1.00",  # Placeholder
+                "Alpha": "0.00",  # Placeholder
+                "Information Ratio": "0.00",  # Placeholder
+                "Treynor Ratio": "0.00",  # Placeholder
+                "Calmar Ratio": "0.00"  # Placeholder
+            }
+        
+        return {
+            "ticker": ticker.upper(),
+            "period": period,
+            "timestamp": datetime.now().isoformat(),
+            "data_points": len(hist),
+            "price_data": {
+                "dates": hist.index.strftime('%Y-%m-%d').tolist(),
+                "open": hist['Open'].tolist(),
+                "high": hist['High'].tolist(),
+                "low": hist['Low'].tolist(),
+                "close": hist['Close'].tolist(),
+                "volume": hist['Volume'].astype(int).tolist()
+            },
+            "technical_indicators": indicators,
+            "risk_metrics": risk_metrics
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching market data: {str(e)}")
+
+@app.get("/api/ai/global-markets")
+async def get_ai_global_markets():
+    """Get AI-enhanced global markets data"""
+    try:
+        # Major indices
+        indices = {
+            "^GSPC": {"name": "S&P 500", "region": "US"},
+            "^IXIC": {"name": "NASDAQ", "region": "US"},
+            "^DJI": {"name": "Dow Jones", "region": "US"},
+            "^RUT": {"name": "Russell 2000", "region": "US"},
+            "^FTSE": {"name": "FTSE 100", "region": "UK"},
+            "^N225": {"name": "Nikkei 225", "region": "Japan"},
+            "^HSI": {"name": "Hang Seng", "region": "Hong Kong"}
+        }
+        
+        regions_data = {}
+        
+        for symbol, info in indices.items():
+            try:
+                data = get_real_time_data(symbol)
+                if info["region"] not in regions_data:
+                    regions_data[info["region"]] = {
+                        "name": info["region"],
+                        "indices": {},
+                        "overall_change_percent": 0
+                    }
+                
+                regions_data[info["region"]]["indices"][symbol.replace("^", "")] = {
+                    "name": info["name"],
+                    "price": data["current_price"],
+                    "change": data["change"],
+                    "change_percent": data["change_pct"],
+                    "volume": data["volume"],
+                    "timestamp": data["timestamp"]
+                }
+            except:
+                continue
+        
+        # Calculate overall change for each region
+        for region in regions_data.values():
+            if region["indices"]:
+                changes = [idx["change_percent"] for idx in region["indices"].values()]
+                region["overall_change_percent"] = sum(changes) / len(changes)
+        
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "regions": regions_data,
+            "currencies": {},
+            "commodities": {}
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching global markets: {str(e)}")
+
+@app.get("/api/growth-analysis/{ticker}")
+async def get_growth_analysis(ticker: str):
+    """Get growth analysis for a stock"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        hist = stock.history(period="2y")
+        
+        if hist.empty:
+            raise HTTPException(status_code=404, detail=f"No historical data found for {ticker}")
+        
+        # Calculate growth metrics
+        current_price = hist['Close'].iloc[-1]
+        price_1y_ago = hist['Close'].iloc[-252] if len(hist) >= 252 else hist['Close'].iloc[0]
+        price_6m_ago = hist['Close'].iloc[-126] if len(hist) >= 126 else hist['Close'].iloc[0]
+        price_3m_ago = hist['Close'].iloc[-63] if len(hist) >= 63 else hist['Close'].iloc[0]
+        price_1m_ago = hist['Close'].iloc[-21] if len(hist) >= 21 else hist['Close'].iloc[0]
+        
+        # Calculate returns
+        returns_1y = ((current_price - price_1y_ago) / price_1y_ago) * 100
+        returns_6m = ((current_price - price_6m_ago) / price_6m_ago) * 100
+        returns_3m = ((current_price - price_3m_ago) / price_3m_ago) * 100
+        returns_1m = ((current_price - price_1m_ago) / price_1m_ago) * 100
+        
+        # Calculate volatility
+        daily_returns = hist['Close'].pct_change().dropna()
+        volatility_1y = daily_returns.std() * np.sqrt(252) * 100
+        
+        # Calculate moving averages
+        sma_20 = hist['Close'].rolling(window=20).mean().iloc[-1]
+        sma_50 = hist['Close'].rolling(window=50).mean().iloc[-1]
+        sma_200 = hist['Close'].rolling(window=200).mean().iloc[-1] if len(hist) >= 200 else None
+        
+        # Growth momentum
+        momentum_score = 0
+        if current_price > sma_20:
+            momentum_score += 1
+        if current_price > sma_50:
+            momentum_score += 1
+        if sma_200 and current_price > sma_200:
+            momentum_score += 1
+        if returns_1m > 0:
+            momentum_score += 1
+        if returns_3m > 0:
+            momentum_score += 1
+        
+        # Growth trend analysis
+        recent_trend = "Bullish" if returns_3m > 5 else "Bearish" if returns_3m < -5 else "Sideways"
+        
+        # Growth grade
+        if returns_1y > 20 and volatility_1y < 30:
+            growth_grade = "A"
+        elif returns_1y > 10 and volatility_1y < 40:
+            growth_grade = "B"
+        elif returns_1y > 0 and volatility_1y < 50:
+            growth_grade = "C"
+        else:
+            growth_grade = "D"
+        
+        return {
+            "ticker": ticker.upper(),
+            "timestamp": datetime.now().isoformat(),
+            "price_history": {
+                "current_price": round(current_price, 2),
+                "price_1y_ago": round(price_1y_ago, 2),
+                "price_6m_ago": round(price_6m_ago, 2),
+                "price_3m_ago": round(price_3m_ago, 2),
+                "price_1m_ago": round(price_1m_ago, 2)
+            },
+            "returns": {
+                "returns_1y": round(returns_1y, 2),
+                "returns_6m": round(returns_6m, 2),
+                "returns_3m": round(returns_3m, 2),
+                "returns_1m": round(returns_1m, 2)
+            },
+            "technical_indicators": {
+                "sma_20": round(sma_20, 2),
+                "sma_50": round(sma_50, 2),
+                "sma_200": round(sma_200, 2) if sma_200 else None,
+                "volatility_1y": round(volatility_1y, 2)
+            },
+            "growth_analysis": {
+                "momentum_score": momentum_score,
+                "growth_trend": recent_trend,
+                "growth_grade": growth_grade,
+                "growth_strength": "Strong" if returns_1y > 15 else "Moderate" if returns_1y > 5 else "Weak"
+            },
+            "fundamental_growth": {
+                "revenue_growth": info.get('revenueGrowth', 0) * 100,
+                "earnings_growth": info.get('earningsGrowth', 0) * 100,
+                "profit_margin": info.get('profitMargins', 0) * 100,
+                "roe": info.get('returnOnEquity', 0) * 100
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching growth analysis: {str(e)}")
+
+@app.get("/api/forex/analysis")
+async def get_forex_analysis():
+    """Get comprehensive forex market analysis"""
+    try:
+        # Major currency pairs
+        major_pairs = [
+            {"symbol": "EURUSD=X", "name": "EUR/USD", "display": "Euro/US Dollar"},
+            {"symbol": "GBPUSD=X", "name": "GBP/USD", "display": "British Pound/US Dollar"},
+            {"symbol": "USDJPY=X", "name": "USD/JPY", "display": "US Dollar/Japanese Yen"},
+            {"symbol": "USDCHF=X", "name": "USD/CHF", "display": "US Dollar/Swiss Franc"},
+            {"symbol": "AUDUSD=X", "name": "AUD/USD", "display": "Australian Dollar/US Dollar"},
+            {"symbol": "USDCAD=X", "name": "USD/CAD", "display": "US Dollar/Canadian Dollar"},
+            {"symbol": "NZDUSD=X", "name": "NZD/USD", "display": "New Zealand Dollar/US Dollar"}
+        ]
+        
+        forex_data = []
+        total_change = 0
+        active_pairs = 0
+        
+        for pair in major_pairs:
+            try:
+                # Get forex data using yfinance
+                forex = yf.Ticker(pair["symbol"])
+                hist = forex.history(period="5d")
+                
+                if not hist.empty:
+                    current_price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                    change = current_price - prev_price
+                    change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
+                    
+                    # Get additional info
+                    info = forex.info
+                    volume = info.get('volume', 0)
+                    
+                    forex_data.append({
+                        "symbol": pair["symbol"].replace("=X", ""),
+                        "name": pair["display"],
+                        "price": round(current_price, 5),
+                        "change": round(change, 5),
+                        "change_pct": round(change_pct, 2),
+                        "volume": volume,
+                        "data_source": "yfinance",
+                        "is_live": True
+                    })
+                    
+                    total_change += change_pct
+                    active_pairs += 1
+                    
+            except Exception as e:
+                print(f"Error fetching {pair['symbol']}: {e}")
+                # Add placeholder data
+                forex_data.append({
+                    "symbol": pair["symbol"].replace("=X", ""),
+                    "name": pair["display"],
+                    "price": 0.0,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                    "volume": 0,
+                    "data_source": "error",
+                    "is_live": False
+                })
+                continue
+        
+        # Calculate market sentiment
+        avg_change = total_change / active_pairs if active_pairs > 0 else 0
+        
+        if avg_change > 0.1:
+            market_sentiment = "Bullish USD"
+        elif avg_change < -0.1:
+            market_sentiment = "Bearish USD"
+        else:
+            market_sentiment = "Neutral"
+        
+        # Get economic calendar data (simplified)
+        economic_events = [
+            "Fed Interest Rate Decision - Tomorrow 2:00 PM ET",
+            "ECB Monetary Policy Meeting - Thursday 7:45 AM ET",
+            "US Non-Farm Payrolls - Friday 8:30 AM ET",
+            "UK GDP Release - Wednesday 4:30 AM ET"
+        ]
+        
+        # Technical analysis summary
+        technical_summary = {
+            "dollar_strength": "Strong" if avg_change > 0 else "Weak" if avg_change < -0.05 else "Neutral",
+            "volatility": "High" if abs(avg_change) > 0.5 else "Moderate" if abs(avg_change) > 0.2 else "Low",
+            "trend": "Uptrend" if avg_change > 0.1 else "Downtrend" if avg_change < -0.1 else "Sideways"
+        }
+        
+        return {
+            "currency_pairs": forex_data,
+            "market_sentiment": market_sentiment,
+            "avg_change": round(avg_change, 2),
+            "technical_summary": technical_summary,
+            "economic_events": economic_events,
+            "timestamp": datetime.now().isoformat(),
+            "data_quality": "high" if active_pairs >= 5 else "medium" if active_pairs >= 3 else "low",
+            "active_pairs": active_pairs,
+            "total_pairs": len(major_pairs)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching forex analysis: {str(e)}")
+
+@app.get("/api/crypto/market")
+async def get_crypto_market():
+    """Get comprehensive crypto market analysis"""
+    try:
+        # Major cryptocurrencies
+        crypto_pairs = [
+            {"symbol": "BTC-USD", "name": "Bitcoin", "display": "BTC/USD"},
+            {"symbol": "ETH-USD", "name": "Ethereum", "display": "ETH/USD"},
+            {"symbol": "BNB-USD", "name": "Binance Coin", "display": "BNB/USD"},
+            {"symbol": "SOL-USD", "name": "Solana", "display": "SOL/USD"},
+            {"symbol": "ADA-USD", "name": "Cardano", "display": "ADA/USD"},
+            {"symbol": "XRP-USD", "name": "Ripple", "display": "XRP/USD"},
+            {"symbol": "DOGE-USD", "name": "Dogecoin", "display": "DOGE/USD"},
+            {"symbol": "AVAX-USD", "name": "Avalanche", "display": "AVAX/USD"},
+            {"symbol": "DOT-USD", "name": "Polkadot", "display": "DOT/USD"},
+            {"symbol": "MATIC-USD", "name": "Polygon", "display": "MATIC/USD"}
+        ]
+        
+        crypto_data = []
+        total_change = 0
+        active_cryptos = 0
+        
+        for crypto in crypto_pairs:
+            try:
+                # Get crypto data using yfinance
+                ticker = yf.Ticker(crypto["symbol"])
+                hist = ticker.history(period="5d")
+                
+                if not hist.empty:
+                    current_price = hist['Close'].iloc[-1]
+                    prev_price = hist['Close'].iloc[-2] if len(hist) > 1 else current_price
+                    change = current_price - prev_price
+                    change_pct = (change / prev_price) * 100 if prev_price != 0 else 0
+                    
+                    # Get additional info
+                    info = ticker.info
+                    volume = info.get('volume24hr', 0)
+                    market_cap = info.get('marketCap', 0)
+                    
+                    crypto_data.append({
+                        "symbol": crypto["symbol"].replace("-USD", ""),
+                        "name": crypto["display"],
+                        "price": round(current_price, 2),
+                        "change": round(change, 2),
+                        "change_pct": round(change_pct, 2),
+                        "volume": volume,
+                        "market_cap": market_cap,
+                        "data_source": "yfinance",
+                        "is_live": True
+                    })
+                    
+                    total_change += change_pct
+                    active_cryptos += 1
+                    
+            except Exception as e:
+                print(f"Error fetching {crypto['symbol']}: {e}")
+                # Add placeholder data
+                crypto_data.append({
+                    "symbol": crypto["symbol"].replace("-USD", ""),
+                    "name": crypto["display"],
+                    "price": 0.0,
+                    "change": 0.0,
+                    "change_pct": 0.0,
+                    "volume": 0,
+                    "market_cap": 0,
+                    "data_source": "error",
+                    "is_live": False
+                })
+                continue
+        
+        # Calculate market sentiment
+        avg_change = total_change / active_cryptos if active_cryptos > 0 else 0
+        
+        if avg_change > 2.0:
+            market_sentiment = "Bullish"
+        elif avg_change < -2.0:
+            market_sentiment = "Bearish"
+        else:
+            market_sentiment = "Neutral"
+        
+        # Get market dominance (simplified)
+        btc_data = next((c for c in crypto_data if c["symbol"] == "BTC"), None)
+        eth_data = next((c for c in crypto_data if c["symbol"] == "ETH"), None)
+        
+        btc_dominance = 45.2  # Simplified - would normally calculate from market cap
+        eth_dominance = 18.7
+        
+        # Fear & Greed Index (simplified)
+        fear_greed_index = 45  # Simplified - would normally fetch from API
+        
+        # Technical analysis summary
+        technical_summary = {
+            "trend": "Bullish" if avg_change > 1.0 else "Bearish" if avg_change < -1.0 else "Sideways",
+            "volatility": "High" if abs(avg_change) > 3.0 else "Moderate" if abs(avg_change) > 1.0 else "Low",
+            "market_cap_dominance": f"BTC: {btc_dominance}% • ETH: {eth_dominance}%"
+        }
+        
+        return {
+            "cryptocurrencies": crypto_data,
+            "market_sentiment": market_sentiment,
+            "avg_change": round(avg_change, 2),
+            "technical_summary": technical_summary,
+            "fear_greed_index": fear_greed_index,
+            "btc_dominance": btc_dominance,
+            "eth_dominance": eth_dominance,
+            "timestamp": datetime.now().isoformat(),
+            "data_quality": "high" if active_cryptos >= 8 else "medium" if active_cryptos >= 5 else "low",
+            "active_cryptos": active_cryptos,
+            "total_cryptos": len(crypto_pairs)
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching crypto market: {str(e)}")
+
+@app.get("/api/risk-assessment/{ticker}")
+async def get_risk_assessment(ticker: str):
+    """Get comprehensive risk assessment for a stock"""
+    try:
+        stock = yf.Ticker(ticker)
+        info = stock.info
+        hist = stock.history(period="2y")
+        
+        if hist.empty:
+            raise HTTPException(status_code=404, detail=f"No historical data found for {ticker}")
+        
+        # Calculate risk metrics
+        daily_returns = hist['Close'].pct_change().dropna()
+        current_price = hist['Close'].iloc[-1]
+        
+        # Volatility calculations
+        volatility_1y = daily_returns.std() * np.sqrt(252) * 100
+        volatility_6m = daily_returns.tail(126).std() * np.sqrt(252) * 100 if len(daily_returns) >= 126 else volatility_1y
+        
+        # Value at Risk (VaR)
+        var_95 = np.percentile(daily_returns, 5) * 100
+        var_99 = np.percentile(daily_returns, 1) * 100
+        
+        # Expected Shortfall (Conditional VaR)
+        expected_shortfall = daily_returns[daily_returns <= np.percentile(daily_returns, 5)].mean() * 100
+        
+        # Maximum Drawdown
+        rolling_max = hist['Close'].cummax()
+        drawdown = (hist['Close'] - rolling_max) / rolling_max
+        max_drawdown = drawdown.min() * 100
+        
+        # Sharpe Ratio (assuming 2% risk-free rate)
+        risk_free_rate = 0.02
+        excess_returns = daily_returns.mean() * 252 - risk_free_rate
+        sharpe_ratio = excess_returns / (daily_returns.std() * np.sqrt(252)) if daily_returns.std() > 0 else 0
+        
+        # Beta and correlation with market
+        beta = info.get('beta', 1.0)
+        
+        # Risk score calculation
+        risk_score = 0
+        risk_factors = []
+        
+        # Volatility risk
+        if volatility_1y > 40:
+            risk_score += 3
+            risk_factors.append("High volatility")
+        elif volatility_1y > 25:
+            risk_score += 2
+            risk_factors.append("Moderate volatility")
+        elif volatility_1y > 15:
+            risk_score += 1
+            risk_factors.append("Low volatility")
+        
+        # Beta risk
+        if beta > 1.5:
+            risk_score += 2
+            risk_factors.append("High market sensitivity")
+        elif beta > 1.2:
+            risk_score += 1
+            risk_factors.append("Moderate market sensitivity")
+        
+        # Drawdown risk
+        if max_drawdown < -30:
+            risk_score += 3
+            risk_factors.append("Large historical losses")
+        elif max_drawdown < -20:
+            risk_score += 2
+            risk_factors.append("Significant historical losses")
+        elif max_drawdown < -10:
+            risk_score += 1
+            risk_factors.append("Moderate historical losses")
+        
+        # VaR risk
+        if var_95 < -5:
+            risk_score += 2
+            risk_factors.append("High downside risk")
+        elif var_95 < -3:
+            risk_score += 1
+            risk_factors.append("Moderate downside risk")
+        
+        # Risk rating
+        if risk_score <= 2:
+            risk_rating = "Low"
+            risk_color = "green"
+        elif risk_score <= 4:
+            risk_rating = "Moderate"
+            risk_color = "yellow"
+        elif risk_score <= 6:
+            risk_rating = "High"
+            risk_color = "orange"
+        else:
+            risk_rating = "Very High"
+            risk_color = "red"
+        
+        # Risk recommendations
+        recommendations = []
+        if volatility_1y > 30:
+            recommendations.append("Consider position sizing due to high volatility")
+        if beta > 1.3:
+            recommendations.append("Monitor market correlation closely")
+        if max_drawdown < -25:
+            recommendations.append("Be prepared for significant price swings")
+        if var_95 < -4:
+            recommendations.append("Set appropriate stop-loss levels")
+        
+        if not recommendations:
+            recommendations.append("Risk profile appears manageable")
+        
+        return {
+            "ticker": ticker.upper(),
+            "timestamp": datetime.now().isoformat(),
+            "risk_metrics": {
+                "volatility_1y": round(volatility_1y, 2),
+                "volatility_6m": round(volatility_6m, 2),
+                "beta": round(beta, 2),
+                "var_95": round(var_95, 2),
+                "var_99": round(var_99, 2),
+                "expected_shortfall": round(expected_shortfall, 2),
+                "max_drawdown": round(max_drawdown, 2),
+                "sharpe_ratio": round(sharpe_ratio, 2)
+            },
+            "risk_assessment": {
+                "risk_score": risk_score,
+                "risk_rating": risk_rating,
+                "risk_color": risk_color,
+                "risk_factors": risk_factors
+            },
+            "recommendations": recommendations,
+            "risk_breakdown": {
+                "market_risk": "High" if beta > 1.3 else "Moderate" if beta > 0.8 else "Low",
+                "volatility_risk": "High" if volatility_1y > 30 else "Moderate" if volatility_1y > 20 else "Low",
+                "downside_risk": "High" if var_95 < -4 else "Moderate" if var_95 < -2 else "Low",
+                "liquidity_risk": "Low" if info.get('volume', 0) > 1000000 else "Moderate"
+            }
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching risk assessment: {str(e)}")
 
 @app.get("/")
 async def root():

@@ -14,6 +14,8 @@ API_KEYS = {
     'POLYGON_API_KEY': os.getenv('POLYGON_API_KEY', ''),
     'FINNHUB_API_KEY': os.getenv('FINNHUB_API_KEY', ''),
     'QUANDL_API_KEY': os.getenv('QUANDL_API_KEY', ''),
+    'TIINGO_API_KEY': os.getenv('TIINGO_API_KEY', '8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46'),
+    'FRED_API_KEY': os.getenv('FRED_API_KEY', '9371fbb0a2b505b3262b5578f44016c5'),
 }
 
 # Data Provider Settings
@@ -60,6 +62,32 @@ DATA_PROVIDER_CONFIG = {
         'supports_historical': True,
         'max_data_points': 10000,
         'timeout': 15
+    },
+    'tiingo': {
+        'name': 'Tiingo',
+        'base_url': 'https://api.tiingo.com/tiingo',
+        'rate_limit': 1000,  # Free tier: 1000 requests per day
+        'premium_rate_limit': 10000,  # Premium tier: 10000 requests per day
+        'requires_api_key': True,
+        'supports_realtime': True,
+        'supports_historical': True,
+        'max_data_points': 10000,
+        'timeout': 10
+    },
+    'fred': {
+        'name': 'FRED (Federal Reserve Economic Data)',
+        'base_url': 'https://api.stlouisfed.org/fred',
+        'rate_limit': 1200,  # Free tier: 1200 requests per day
+        'requires_api_key': True,
+        'supports_realtime': False,
+        'supports_historical': True,
+        'supports_economic_data': True,
+        'supports_interest_rates': True,
+        'supports_inflation_data': True,
+        'supports_employment_data': True,
+        'supports_gdp_data': True,
+        'max_data_points': 10000,
+        'timeout': 10
     }
 }
 
