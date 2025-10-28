@@ -1,6 +1,6 @@
-# 📊 Financial Analyzer Pro
+# 📊 MONETA Financial Analyzer
 
-A comprehensive web-based financial analysis application built with Streamlit and FastAPI, providing advanced financial insights, market analysis, and peer comparisons.
+A comprehensive financial analysis suite with Streamlit (web), FastAPI (backend), Android (native), and React Native (Expo) mobile apps. Branded as MONETA with a blue/gold theme and consistent icons, splash screens, and UI.
 
 ## ✨ Features
 
@@ -11,6 +11,7 @@ A comprehensive web-based financial analysis application built with Streamlit an
 - **Peer Comparison**: Industry peer analysis with key metrics
 - **Market Overview**: Real-time market indices and trending stocks
 - **Industry Analysis**: Sector-wide performance metrics
+ - **Economic Indicators**: FRED-based housing, foreclosure, and consumer spending signals
 
 ### 📈 Data Visualization
 - Interactive charts using Plotly
@@ -21,9 +22,11 @@ A comprehensive web-based financial analysis application built with Streamlit an
 
 ### 🏗️ Architecture
 - **Frontend**: Streamlit web application
-- **Backend**: FastAPI REST API
-- **Data**: Realistic financial data generation
-- **Styling**: Modern, responsive UI with custom CSS
+- **Backend**: FastAPI REST API (`proxy.py`) with multi-API fallback and `/api/system/status`
+- **Android**: Native Kotlin app (`FinancialAnalyzerApp/`), MONETA branding applied
+- **React Native**: Expo app (`FinancialAnalyzerMobile/`) with dark/light themes and branded assets
+- **Data**: Live market data with fallbacks (Yahoo, Tiingo, Alpha Vantage, FRED)
+- **Styling**: Modern, responsive UI with custom CSS and consistent mobile theming
 
 ## 🚀 Quick Start
 
@@ -78,6 +81,7 @@ financial_analyzer_web_latest/
 ### Utility
 - `GET /` - API information and available endpoints
 - `GET /health` - Health check endpoint
+ - `GET /api/system/status` - Integrated API health and rate-limit status
 
 ## 💡 Usage Examples
 
@@ -154,6 +158,12 @@ curl http://localhost:8000/api/financials/AAPL
 - Test different stock tickers
 - Verify chart interactions
 - Check responsive design
+
+## 🎨 Branding
+
+- Colors: MONETA Blue `#1E3A8A`, MONETA Gold `#FFD700`
+- Icons/Splash: see `FinancialAnalyzerMobile/assets/` (SVG + generated PNG)
+- Store assets: see `store_assets/feature_graphic.svg`
 
 ## 🔮 Future Enhancements
 
