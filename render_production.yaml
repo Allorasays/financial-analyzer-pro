@@ -1,0 +1,45 @@
+services:
+  # Backend API Service
+  - type: web
+    name: moneta-backend-api
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn proxy:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      # API Keys (set these in Render dashboard)
+      - key: TIINGO_API_KEY
+        value: 
+      - key: ALPHAVANTAGE_API_KEY
+        value: 
+      - key: NEWSAPI_KEY
+        value: 
+      - key: FRED_API_KEY
+        value: 
+      # Optional
+      - key: YF_PROXY_URL
+        value: 
+      - key: ENABLE_TIINGO
+        value: true
+      - key: ENABLE_ALPHA_VANTAGE
+        value: true
+
+  # Streamlit Web Interface  
+  - type: web
+    name: moneta-web-dashboard
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: STREAMLIT_SERVER_HEADLESS
+        value: true
+      - key: STREAMLIT_SERVER_ADDRESS
+        value: 0.0.0.0
+      - key: BACKEND_URL
+        value: https://moneta-backend-api.onrender.com
+
