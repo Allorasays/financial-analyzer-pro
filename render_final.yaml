@@ -36,4 +36,5 @@ services:
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-begin
+      - key: API_BASE_URL
+        value: https://moneta-backend-api.onrender.com
