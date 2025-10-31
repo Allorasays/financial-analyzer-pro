@@ -4,8 +4,8 @@ services:
     name: moneta-backend-api
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m uvicorn proxy:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    startCommand: python -m uvicorn proxy:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
@@ -27,7 +27,7 @@ services:
     name: moneta-web-dashboard
     env: python
     plan: free
-    buildCommand: pip install -r requirements.txt
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
     startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
