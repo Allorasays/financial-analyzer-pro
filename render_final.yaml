@@ -1,10 +1,34 @@
 services:
+  # Backend API (FastAPI via uvicorn)
   - type: web
-    name: financial-analyzer-final
+    name: moneta-backend-api
     env: python
     plan: free
-    buildCommand: python deploy.py
-    startCommand: python deploy.py
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn proxy:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: ENABLE_TIINGO
+        value: true
+      - key: ENABLE_ALPHA_VANTAGE
+        value: true
+      - key: TIINGO_API_KEY
+        sync: false
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+
+  # Web Dashboard (Streamlit)
+  - type: web
+    name: moneta-web-dashboard
+    env: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
@@ -12,24 +36,4 @@ services:
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+begin
