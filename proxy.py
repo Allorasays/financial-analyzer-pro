@@ -3294,6 +3294,11 @@ async def root():
         }
     }
 
+# Health check endpoint for platform load balancers
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
 # Error handlers
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
