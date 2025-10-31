@@ -61,3 +61,4 @@ def get_analytics_summary():
         "unique_sessions": len(set(e.get("session_id", "unknown") for e in events))
     }
 
+
