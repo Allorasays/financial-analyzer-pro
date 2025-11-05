@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MONETA Financial Analyzer - API Documentation</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%);
+            color: #333;
+            line-height: 1.6;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%);
+            color: white;
+            padding: 40px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+        
+        .header .version {
+            font-size: 1.2em;
+            opacity: 0.9;
+            margin-bottom: 20px;
+        }
+        
+        .header .badge {
+            display: inline-block;
+            background: rgba(255,255,255,0.2);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            margin: 5px;
+        }
+        
+        .content {
+            padding: 40px;
+        }
+        
+        .section {
+            margin-bottom: 40px;
+        }
+        
+        .section h2 {
+            color: #1e3a8a;
+            font-size: 1.8em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #ffd700;
+        }
+        
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .feature-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #3b82f6;
+            transition: transform 0.2s;
+        }
+        
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+        
+        .feature-card h3 {
+            color: #1e3a8a;
+            margin-bottom: 10px;
+        }
+        
+        .endpoints {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        
+        .endpoint-group {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-top: 4px solid #ffd700;
+        }
+        
+        .endpoint-group h3 {
+            color: #1e3a8a;
+            margin-bottom: 15px;
+            font-size: 1.3em;
+        }
+        
+        .endpoint-list {
+            list-style: none;
+        }
+        
+        .endpoint-list li {
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #3b82f6;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            word-break: break-all;
+        }
+        
+        .endpoint-list li:hover {
+            background: #e0f2fe;
+            border-left-color: #1e3a8a;
+        }
+        
+        .api-info {
+            background: #e0f2fe;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border-left: 4px solid #1e3a8a;
+        }
+        
+        .api-info p {
+            margin: 5px 0;
+        }
+        
+        .api-info strong {
+            color: #1e3a8a;
+        }
+        
+        .footer {
+            background: #1e3a8a;
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        
+        .footer a {
+            color: #ffd700;
+            text-decoration: none;
+        }
+        
+        .footer a:hover {
+            text-decoration: underline;
+        }
+        
+        @media (max-width: 768px) {
+            .header h1 {
+                font-size: 1.8em;
+            }
+            
+            .content {
+                padding: 20px;
+            }
+            
+            .features {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>💰 MONETA Financial Analyzer</h1>
+            <div class="version">API v2.0.0</div>
+            <div>
+                <span class="badge">Financial Analysis</span>
+                <span class="badge">ML Predictions</span>
+                <span class="badge">Portfolio Management</span>
+            </div>
+        </div>
+        
+        <div class="content">
+            <div class="section">
+                <h2>📋 API Information</h2>
+                <div class="api-info">
+                    <p><strong>Message:</strong> Financial Analyzer Pro API v2.0</p>
+                    <p><strong>Version:</strong> 2.0.0</p>
+                    <p><strong>Base URL:</strong> <span id="baseUrl">Loading...</span></p>
+                    <p><strong>Status:</strong> <span id="status">Checking...</span></p>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>✨ Features</h2>
+                <div class="features">
+                    <div class="feature-card">
+                        <h3>📊 Real-time Market Data</h3>
+                        <p>Get live stock prices, market indices, and real-time financial data</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🔐 User Authentication</h3>
+                        <p>Secure user registration, login, and portfolio management</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📈 Technical Analysis</h3>
+                        <p>Advanced technical indicators and chart analysis tools</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>🤖 ML Predictions</h3>
+                        <p>Machine learning-powered price predictions and forecasts</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>📋 Watchlist Management</h3>
+                        <p>Track multiple stocks and manage your watchlist</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>⚡ Rate Limiting</h3>
+                        <p>Intelligent API rate limiting to ensure fair usage</p>
+                    </div>
+                    <div class="feature-card">
+                        <h3>💾 Data Export</h3>
+                        <p>Export portfolio, transactions, and watchlist data</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="section">
+                <h2>🔌 API Endpoints</h2>
+                <div class="endpoints">
+                    <div class="endpoint-group">
+                        <h3>🔐 Authentication</h3>
+                        <ul class="endpoint-list">
+                            <li>POST /api/auth/register</li>
+                            <li>POST /api/auth/login</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>📊 Market Data</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/market/realtime/{ticker}</li>
+                            <li>GET /api/market/overview</li>
+                            <li>GET /api/ai/market-data/{ticker}</li>
+                            <li>GET /api/ai/global-markets</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>📈 Technical Analysis</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/technical/{ticker}</li>
+                            <li>GET /api/ai/technical-analysis/{ticker}</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>🤖 ML Predictions</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/ml/predictions/{ticker}</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>💼 Portfolio</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/portfolio</li>
+                            <li>POST /api/portfolio/add</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>📋 Watchlist</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/watchlist</li>
+                            <li>POST /api/watchlist/add</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>💾 Export</h3>
+                        <ul class="endpoint-list">
+                            <li>GET /api/export/portfolio/csv</li>
+                            <li>GET /api/export/transactions/csv</li>
+                            <li>GET /api/export/watchlist/csv</li>
+                            <li>GET /api/export/portfolio/summary</li>
+                            <li>GET /api/export/portfolio/performance</li>
+                            <li>GET /api/export/activity-logs/csv</li>
+                            <li>GET /api/export/all</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="endpoint-group">
+                        <h3>⚙️ Admin & System</h3>
+                        <ul class="endpoint-list">
+                            <li>POST /api/admin/cleanup</li>
+                            <li>GET /api/rate-limits</li>
+                            <li>GET /api/system/status</li>
+                            <li>GET /health</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>MONETA Financial Analyzer API v2.0.0</p>
+            <p>Visit <a href="/docs" target="_blank">Interactive API Docs</a> for detailed endpoint documentation</p>
+        </div>
+    </div>
+    
+    <script>
+        // Get base URL from current location
+        const baseUrl = window.location.origin;
+        document.getElementById('baseUrl').textContent = baseUrl;
+        
+        // Check API health
+        fetch('/health')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('status').textContent = '✅ Online';
+                document.getElementById('status').style.color = '#10b981';
+            })
+            .catch(error => {
+                document.getElementById('status').textContent = '⚠️ Checking...';
+                document.getElementById('status').style.color = '#f59e0b';
+            });
+    </script>
+</body>
+</html>
+

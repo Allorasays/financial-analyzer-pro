@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, status, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
@@ -40,6 +40,20 @@ try:
 except ImportError as e:
     print(f"NewsAPI not available: {e}")
     NEWSAPI_AVAILABLE = False
+
+# Import alternative data service (free sources, no API keys required)
+try:
+    from alternative_data_service import (
+        get_sec_filings,
+        get_reddit_sentiment,
+        get_insider_transactions,
+        get_institutional_holdings,
+        get_comprehensive_alternative_data
+    )
+    ALTERNATIVE_DATA_AVAILABLE = True
+except ImportError as e:
+    print(f"Alternative data service not available: {e}")
+    ALTERNATIVE_DATA_AVAILABLE = False
 
 load_dotenv()
 
@@ -2589,6 +2603,179 @@ async def ai_health_alias():
     """Alias for Android app compatibility - maps to /health"""
     return {"status": "ok"}
 
+# ========================================================================
+# ALTERNATIVE DATA ENDPOINTS (Free Sources - No API Keys Required)
+# ========================================================================
+
+@app.get("/api/alternative/sec-filings/{ticker}")
+async def get_sec_filings_endpoint(ticker: str, filing_type: str = Query("10-K", description="Filing type (10-K, 10-Q, 8-K, etc.)")):
+    """Get SEC EDGAR filings - FREE, no API key required"""
+    if not ALTERNATIVE_DATA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Alternative data service not available")
+    
+    try:
+        filings_data = get_sec_filings(ticker.upper(), filing_type)
+        if filings_data:
+            return JSONResponse(content={
+                "success": True,
+                "ticker": ticker.upper(),
+                "data": filings_data,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "ticker": ticker.upper(),
+                    "error": "No SEC filings found",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Failed to fetch SEC filings: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/alternative/reddit-sentiment/{ticker}")
+async def get_reddit_sentiment_endpoint(ticker: str):
+    """Get Reddit sentiment analysis - FREE, no API key required"""
+    if not ALTERNATIVE_DATA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Alternative data service not available")
+    
+    try:
+        reddit_data = get_reddit_sentiment(ticker.upper())
+        if reddit_data:
+            return JSONResponse(content={
+                "success": True,
+                "ticker": ticker.upper(),
+                "data": reddit_data,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "ticker": ticker.upper(),
+                    "error": "No Reddit sentiment data found",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Failed to fetch Reddit sentiment: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/alternative/insider-transactions/{ticker}")
+async def get_insider_transactions_endpoint(ticker: str):
+    """Get insider transactions from SEC Form 4 - FREE, no API key required"""
+    if not ALTERNATIVE_DATA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Alternative data service not available")
+    
+    try:
+        insider_data = get_insider_transactions(ticker.upper())
+        if insider_data:
+            return JSONResponse(content={
+                "success": True,
+                "ticker": ticker.upper(),
+                "data": insider_data,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "ticker": ticker.upper(),
+                    "error": "No insider transaction data found",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Failed to fetch insider transactions: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/alternative/institutional-holdings/{ticker}")
+async def get_institutional_holdings_endpoint(ticker: str):
+    """Get institutional holdings from SEC 13F filings - FREE, no API key required"""
+    if not ALTERNATIVE_DATA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Alternative data service not available")
+    
+    try:
+        holdings_data = get_institutional_holdings(ticker.upper())
+        if holdings_data:
+            return JSONResponse(content={
+                "success": True,
+                "ticker": ticker.upper(),
+                "data": holdings_data,
+                "timestamp": datetime.now().isoformat()
+            })
+        else:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "success": False,
+                    "ticker": ticker.upper(),
+                    "error": "No institutional holdings data found",
+                    "timestamp": datetime.now().isoformat()
+                }
+            )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Failed to fetch institutional holdings: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
+@app.get("/api/alternative/comprehensive/{ticker}")
+async def get_comprehensive_alternative_data_endpoint(ticker: str):
+    """Get all available alternative data for a ticker - FREE sources only"""
+    if not ALTERNATIVE_DATA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Alternative data service not available")
+    
+    try:
+        alt_data = get_comprehensive_alternative_data(ticker.upper())
+        return JSONResponse(content={
+            "success": True,
+            "ticker": ticker.upper(),
+            "data": alt_data,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False,
+                "ticker": ticker.upper(),
+                "error": f"Failed to fetch alternative data: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+
 @app.get("/api/ai/batch-market-data")
 async def batch_market_data_alias(tickers: str = Query(..., description="Comma-separated list of tickers")):
     """Get market data for multiple tickers"""
@@ -3385,6 +3572,8 @@ async def root():
     return {
         "message": "Financial Analyzer Pro API v2.0",
         "version": "2.0.0",
+        "documentation": "/docs",
+        "api_docs": "/api_documentation.html",
         "features": [
             "Real-time market data",
             "User authentication & portfolios",
@@ -3406,6 +3595,36 @@ async def root():
             "rate_limits": "/api/rate-limits"
         }
     }
+
+@app.get("/api_documentation.html", response_class=HTMLResponse)
+async def api_documentation():
+    """Serve API documentation HTML page"""
+    doc_path = os.path.join(os.path.dirname(__file__), "api_documentation.html")
+    if os.path.exists(doc_path):
+        with open(doc_path, "r", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read())
+    else:
+        # Return a simple HTML page if file doesn't exist
+        return HTMLResponse(content="""
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>MONETA Financial Analyzer - API Documentation</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 20px; background: #f5f5f5; }
+                .container { max-width: 1200px; margin: 0 auto; background: white; padding: 40px; border-radius: 8px; }
+                h1 { color: #1e3a8a; }
+                .endpoint { background: #f8f9fa; padding: 10px; margin: 5px 0; border-left: 3px solid #3b82f6; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>💰 MONETA Financial Analyzer API v2.0.0</h1>
+                <p>API documentation page. Visit <a href="/docs">Interactive API Docs</a> for detailed endpoint information.</p>
+            </div>
+        </body>
+        </html>
+        """)
 
 # Health check endpoint for platform load balancers
 @app.get("/health")
