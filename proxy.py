@@ -28,6 +28,8 @@ import io
 from fastapi.responses import StreamingResponse
 import zipfile
 from datetime import datetime, timedelta
+import secrets
+import uuid
 from api_fallback_strategy import api_fallback
 
 # Import sentiment analysis service
@@ -407,6 +409,19 @@ class DatabaseManager:
                 )
             ''')
             
+            # Password reset tokens table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS password_reset_tokens (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    token TEXT UNIQUE NOT NULL,
+                    expires_at TIMESTAMP NOT NULL,
+                    used BOOLEAN DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            ''')
+            
             # Create indexes for better performance
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_portfolios_user_ticker ON portfolios(user_id, ticker)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_watchlists_user_ticker ON watchlists(user_id, ticker)')
@@ -414,6 +429,9 @@ class DatabaseManager:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_usage_logs_user_endpoint ON api_usage_logs(user_id, endpoint)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_rate_limit_logs_client_type ON rate_limit_logs(client_id, endpoint_type)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_sessions_token ON user_sessions(session_token)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_token ON password_reset_tokens(token)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)')
     
     def log_api_usage(self, user_id: int = None, endpoint: str = "", request_method: str = "", 
                       response_status: int = 0, response_time_ms: int = 0, 
@@ -458,6 +476,85 @@ class DatabaseManager:
         except Exception as e:
             print(f"Error getting user: {e}")
             return None
+    
+    def get_user_by_email(self, email: str):
+        """Get user by email"""
+        try:
+            with self.get_db_cursor() as cursor:
+                cursor.execute('''
+                    SELECT u.*, up.default_currency, up.timezone, up.risk_tolerance, up.investment_goals
+                    FROM users u
+                    LEFT JOIN user_preferences up ON u.id = up.user_id
+                    WHERE u.email = ? AND u.is_active = 1
+                ''', (email,))
+                return cursor.fetchone()
+        except Exception as e:
+            print(f"Error getting user by email: {e}")
+            return None
+    
+    def create_password_reset_token(self, user_id: int, token: str, expires_at: datetime):
+        """Create a password reset token"""
+        try:
+            with self.get_db_cursor() as cursor:
+                # Invalidate any existing tokens for this user
+                cursor.execute('''
+                    UPDATE password_reset_tokens 
+                    SET used = 1 
+                    WHERE user_id = ? AND used = 0
+                ''', (user_id,))
+                
+                # Create new token
+                cursor.execute('''
+                    INSERT INTO password_reset_tokens (user_id, token, expires_at)
+                    VALUES (?, ?, ?)
+                ''', (user_id, token, expires_at.isoformat()))
+                return True
+        except Exception as e:
+            print(f"Error creating reset token: {e}")
+            return False
+    
+    def get_password_reset_token(self, token: str):
+        """Get password reset token if valid"""
+        try:
+            with self.get_db_cursor() as cursor:
+                cursor.execute('''
+                    SELECT prt.*, u.email, u.username
+                    FROM password_reset_tokens prt
+                    JOIN users u ON prt.user_id = u.id
+                    WHERE prt.token = ? AND prt.used = 0 AND prt.expires_at > CURRENT_TIMESTAMP
+                ''', (token,))
+                return cursor.fetchone()
+        except Exception as e:
+            print(f"Error getting reset token: {e}")
+            return None
+    
+    def mark_reset_token_used(self, token: str):
+        """Mark a reset token as used"""
+        try:
+            with self.get_db_cursor() as cursor:
+                cursor.execute('''
+                    UPDATE password_reset_tokens 
+                    SET used = 1 
+                    WHERE token = ?
+                ''', (token,))
+                return True
+        except Exception as e:
+            print(f"Error marking token as used: {e}")
+            return False
+    
+    def update_user_password(self, user_id: int, new_password_hash: str):
+        """Update user password"""
+        try:
+            with self.get_db_cursor() as cursor:
+                cursor.execute('''
+                    UPDATE users 
+                    SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                ''', (new_password_hash, user_id))
+                return True
+        except Exception as e:
+            print(f"Error updating password: {e}")
+            return False
     
     def create_user(self, username: str, email: str, password_hash: str, 
                    first_name: str = None, last_name: str = None, phone: str = None):
@@ -920,6 +1017,16 @@ class UserCreate(BaseModel):
 class UserLogin(BaseModel):
     username: str
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ForgotUsernameRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str
 
 class PortfolioItem(BaseModel):
     ticker: str
@@ -1602,6 +1709,112 @@ async def login_user(user: UserLogin):
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Login error: {str(e)}")
+
+@app.post("/api/auth/forgot-password")
+async def forgot_password(request: ForgotPasswordRequest):
+    """Request password reset token via email"""
+    try:
+        # Get user by email
+        user_data = db_manager.get_user_by_email(request.email)
+        
+        if not user_data:
+            # Don't reveal if email exists (security best practice)
+            return {
+                "message": "If an account exists with this email, a password reset link has been sent.",
+                "success": True
+            }
+        
+        # Generate secure reset token
+        reset_token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(hours=1)  # Token valid for 1 hour
+        
+        # Create reset token in database
+        success = db_manager.create_password_reset_token(user_data['id'], reset_token, expires_at)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to create reset token")
+        
+        # In production, send email here with reset link
+        # For now, return token (in production, don't return token, send via email)
+        # TODO: Integrate email service (SendGrid, AWS SES, etc.)
+        print(f"[PASSWORD RESET] Token for {request.email}: {reset_token}")
+        print(f"[PASSWORD RESET] Reset link: https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}")
+        
+        return {
+            "message": "If an account exists with this email, a password reset link has been sent.",
+            "success": True,
+            # Remove this in production - only for development/testing
+            "reset_token": reset_token if os.getenv("ENVIRONMENT") == "development" else None,
+            "reset_link": f"https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}" if os.getenv("ENVIRONMENT") == "development" else None
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password reset request error: {str(e)}")
+
+@app.post("/api/auth/reset-password")
+async def reset_password(request: ResetPasswordRequest):
+    """Reset password using reset token"""
+    try:
+        # Validate password
+        if len(request.new_password) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        
+        # Get and validate reset token
+        token_data = db_manager.get_password_reset_token(request.token)
+        
+        if not token_data:
+            raise HTTPException(status_code=400, detail="Invalid or expired reset token")
+        
+        # Hash new password
+        new_password_hash = hash_password(request.new_password)
+        
+        # Update password
+        success = db_manager.update_user_password(token_data['user_id'], new_password_hash)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to update password")
+        
+        # Mark token as used
+        db_manager.mark_reset_token_used(request.token)
+        
+        return {
+            "message": "Password reset successfully",
+            "success": True
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Password reset error: {str(e)}")
+
+@app.post("/api/auth/forgot-username")
+async def forgot_username(request: ForgotUsernameRequest):
+    """Retrieve username via email"""
+    try:
+        # Get user by email
+        user_data = db_manager.get_user_by_email(request.email)
+        
+        if not user_data:
+            # Don't reveal if email exists (security best practice)
+            return {
+                "message": "If an account exists with this email, the username has been sent.",
+                "success": True
+            }
+        
+        # In production, send email here with username
+        # For now, return username (in production, send via email only)
+        # TODO: Integrate email service (SendGrid, AWS SES, etc.)
+        print(f"[USERNAME RECOVERY] Username for {request.email}: {user_data['username']}")
+        
+        return {
+            "message": "If an account exists with this email, the username has been sent.",
+            "success": True,
+            # Remove this in production - only for development/testing
+            "username": user_data['username'] if os.getenv("ENVIRONMENT") == "development" else None
+        }
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Username recovery error: {str(e)}")
 
 @app.get("/api/market/realtime/{ticker}")
 async def get_realtime_data(ticker: str):
