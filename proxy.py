@@ -3568,7 +3568,7 @@ async def get_risk_assessment(ticker: str):
 
 @app.get("/")
 async def root():
-    """Root endpoint with API information"""
+    """Root endpoint with API information - returns JSON"""
     return {
         "message": "Financial Analyzer Pro API v2.0",
         "version": "2.0.0",
@@ -3625,6 +3625,7 @@ async def api_documentation():
         </body>
         </html>
         """)
+
 
 # Health check endpoint for platform load balancers
 @app.get("/health")
