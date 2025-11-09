@@ -81,3 +81,4 @@ The `app.py` includes:
 
 The Streamlit app code is correct. The issue is likely that the existing service `financial-analyzer-pro-simple` is running an old version, or the new blueprint hasn't been deployed yet.
 
+
