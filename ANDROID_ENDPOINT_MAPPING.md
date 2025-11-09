@@ -91,3 +91,4 @@ Before testing Android app, verify these endpoints work or add aliases:
 3. **Test all endpoints** from command line
 4. **Update Android app** if needed to match backend endpoints
 
+

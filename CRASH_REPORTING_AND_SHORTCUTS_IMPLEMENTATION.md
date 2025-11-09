@@ -141,3 +141,4 @@ FirebaseCrashlytics.getInstance().recordException(Exception("Test exception"))
 - ⏳ Testing: **Pending** (need to rebuild and test)
 - ⏳ Firebase Configuration: **Verify** (ensure google-services.json is present)
 
+

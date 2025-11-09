@@ -31,6 +31,7 @@ from datetime import datetime, timedelta
 import secrets
 import uuid
 from api_fallback_strategy import api_fallback
+from monitoring.ml_metrics_logger import log_prediction_metrics
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -1623,6 +1624,23 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "future_predictions": future_predictions,
             "status": "success"
         }
+
+        try:
+            log_prediction_metrics(
+                ticker,
+                {
+                    "confidence": response["confidence_score"],
+                    "model_accuracy": response["predictions"]["model_accuracy"],
+                    "rmse": response["model_metrics"]["rmse"],
+                    "mae": response["model_metrics"]["mae"],
+                    "r2_score": response["model_metrics"]["r2_score"],
+                    "current_price": response["current_price"],
+                    "model_version": response["model_metadata"]["model_version"],
+                    "data_points": response["data_points"],
+                },
+            )
+        except Exception as exc:
+            print(f"[ML-METRICS] Logging failed for {ticker}: {exc}")
         
         # Cache the result for 30 minutes to reduce API calls
         cache.set(cache_key, response, ttl=1800)  # 30 minutes cache
@@ -1631,6 +1649,16 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         
     except Exception as e:
         # Return error response instead of raising HTTPException - Android compatible format
+        try:
+            log_prediction_metrics(
+                ticker,
+                {
+                    "status": "error",
+                    "error": str(e),
+                },
+            )
+        except Exception as exc:
+            print(f"[ML-METRICS] Logging failed for error case {ticker}: {exc}")
         return {
             "ticker": ticker.upper(),
             "prediction_days": days_ahead,

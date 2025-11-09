@@ -12,50 +12,72 @@ import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
+from pathlib import Path
+from urllib.parse import urljoin, urlparse
 import warnings
 warnings.filterwarnings('ignore')
 
 # Add current directory to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
-def test_backend_availability():
+DEFAULT_BASE_URL = os.getenv("ML_BASE_URL", "https://moneta-backend-api.onrender.com/")
+DEFAULT_TICKERS = [t.strip().upper() for t in os.getenv(
+    "ML_EVAL_TICKERS",
+    "AAPL,MSFT,GOOGL,TSLA,SPY,QQQ,NVDA"
+).split(",") if t.strip()]
+REPORT_PATH = Path(os.getenv("ML_EVAL_REPORT_PATH", os.path.join(current_dir, "reports", "ml_accuracy_report.json")))
+REPORT_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+
+def _build_url(base_url: str, path: str) -> str:
+    if not base_url.endswith("/"):
+        base_url = base_url + "/"
+    return urljoin(base_url, path.lstrip("/"))
+
+
+def _is_local(base_url: str) -> bool:
+    parsed = urlparse(base_url)
+    return parsed.hostname in {"localhost", "127.0.0.1"} or base_url.startswith("http://0.0.0.0")
+
+def test_backend_availability(base_url: str = DEFAULT_BASE_URL):
     """Test if backend services are running"""
     print("Testing Backend Availability...")
-    
+    proxy_status = False
+    mobile_status = True
+
+    health_url = _build_url(base_url, "api/stats")
     try:
-        # Test main proxy
-        response = requests.get("http://localhost:8000/api/stats", timeout=5)
+        response = requests.get(health_url, timeout=10)
         if response.status_code == 200:
-            print("[SUCCESS] Main proxy (port 8000): Running")
+            print(f"[SUCCESS] Backend reachable at {health_url}")
             proxy_status = True
         else:
-            print("[ERROR] Main proxy (port 8000): Not responding")
-            proxy_status = False
-    except:
-        print("[ERROR] Main proxy (port 8000): Not running")
-        proxy_status = False
-    
-    try:
-        # Test mobile API
-        response = requests.get("http://localhost:8001/api/stats", timeout=5)
-        if response.status_code == 200:
-            print("[SUCCESS] Mobile API (port 8001): Running")
-            mobile_status = True
-        else:
-            print("[ERROR] Mobile API (port 8001): Not responding")
+            print(f"[ERROR] Backend responded with status {response.status_code} at {health_url}")
+    except Exception as exc:
+        print(f"[ERROR] Unable to reach backend at {health_url}: {exc}")
+
+    if _is_local(base_url):
+        try:
+            response = requests.get("http://localhost:8001/api/stats", timeout=5)
+            if response.status_code == 200:
+                print("[SUCCESS] Mobile API (port 8001): Running")
+                mobile_status = True
+            else:
+                print("[ERROR] Mobile API (port 8001): Not responding")
+                mobile_status = False
+        except Exception:
+            print("[ERROR] Mobile API (port 8001): Not running")
             mobile_status = False
-    except:
-        print("[ERROR] Mobile API (port 8001): Not running")
-        mobile_status = False
-    
+
     return proxy_status, mobile_status
 
-def test_ml_prediction_accuracy():
+def test_ml_prediction_accuracy(base_url: str = DEFAULT_BASE_URL, tickers=None):
     """Test ML prediction accuracy with multiple tickers"""
     print("\nTesting ML Prediction Accuracy...")
     
     # Test tickers with different characteristics
-    test_tickers = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'SPY', 'QQQ', 'NVDA']
+    test_tickers = tickers or DEFAULT_TICKERS
     results = {}
     
     for ticker in test_tickers:
@@ -63,7 +85,7 @@ def test_ml_prediction_accuracy():
         
         try:
             # Test ML predictions endpoint
-            url = f"http://localhost:8000/api/ml/predictions/{ticker}"
+            url = _build_url(base_url, f"api/ml/predictions/{ticker}")
             response = requests.get(url, params={'prediction_days': 5}, timeout=30)
             
             if response.status_code == 200:
@@ -77,7 +99,7 @@ def test_ml_prediction_accuracy():
                     r2_score = model_metrics.get('r2_score', 0)
                     rmse = model_metrics.get('rmse', 0)
                     mae = model_metrics.get('mae', 0)
-                    confidence = model_metrics.get('confidence', 0)
+                    confidence = data.get('confidence_score') or model_metrics.get('confidence', 0)
                     
                     # Get price forecast
                     price_forecast = predictions.get('price_forecast', [])
@@ -344,26 +366,39 @@ def generate_recommendations(ml_results, data_source_results, accuracy_summary):
     
     return recommendations
 
-def main():
+def write_report(report_payload: dict):
+    try:
+        REPORT_PATH.write_text(json.dumps(report_payload, indent=2, default=str))
+        print(f"\n[INFO] Detailed report written to {REPORT_PATH}")
+    except Exception as exc:
+        print(f"[WARNING] Failed to write report: {exc}")
+
+
+def main(base_url: str = DEFAULT_BASE_URL, tickers=None):
     """Main evaluation function"""
     print("Financial Analyzer ML Accuracy Evaluation")
     print("=" * 60)
-    print(f"Evaluation Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    evaluation_time = datetime.now()
+    print(f"Evaluation Time: {evaluation_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
+    print(f"Target Base URL: {base_url}")
     
     # Test backend availability
-    proxy_status, mobile_status = test_backend_availability()
+    proxy_status, mobile_status = test_backend_availability(base_url)
     
     if not proxy_status:
         print("\n[ERROR] Backend services not running. Please start them first:")
-        print("   python proxy.py")
+        if _is_local(base_url):
+            print("   python proxy.py")
+        else:
+            print(f"   Verify accessibility of {base_url}")
         return
     
     # Test data sources
     data_source_results = test_data_sources()
     
     # Test ML predictions
-    ml_results = test_ml_prediction_accuracy()
+    ml_results = test_ml_prediction_accuracy(base_url, tickers=tickers)
     
     # Calculate overall accuracy
     accuracy_summary = calculate_overall_accuracy(ml_results)
@@ -401,12 +436,27 @@ def main():
     
     print("\nEvaluation Complete!")
     
-    return {
+    results_payload = {
         'ml_results': ml_results,
         'data_source_results': data_source_results,
         'accuracy_summary': accuracy_summary,
         'recommendations': recommendations
     }
+    
+    report_payload = {
+        "evaluated_at": evaluation_time.isoformat(),
+        "base_url": base_url,
+        "tickers": tickers or DEFAULT_TICKERS,
+        "backend_available": proxy_status,
+        "mobile_api_available": mobile_status,
+        "ml_results": ml_results,
+        "accuracy_summary": accuracy_summary,
+        "data_sources": data_source_results,
+        "recommendations": recommendations,
+    }
+    write_report(report_payload)
+    
+    return results_payload
 
 if __name__ == "__main__":
     results = main()

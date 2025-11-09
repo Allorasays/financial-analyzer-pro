@@ -235,3 +235,4 @@ The 404 errors are due to the Render service sleeping (free tier behavior), not 
 
 The Android app will work correctly once the backend service is awake and running.
 
+
