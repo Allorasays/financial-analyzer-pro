@@ -5,6 +5,7 @@ yfinance>=0.2.0,<1.0.0
 numpy>=1.24.0,<2.0.0
 scipy>=1.11.0,<2.0.0
 scikit-learn>=1.3.0,<2.0.0
+# Signal processing for support/resistance detection
 requests>=2.31.0
 feedparser>=6.0.10
 python-dotenv>=1.0.0
@@ -16,6 +17,8 @@ PyJWT>=2.8.0
 # Timezone and technical analysis
 pytz>=2023.3
 ta>=0.11.0
+# SEC EDGAR data access
+sec-edgar-downloader>=6.0.0
 # ML libraries without GPU dependencies
 # Note: torch/transformers not needed for proxy.py - ML predictions use sklearn only
 vaderSentiment>=3.3.0

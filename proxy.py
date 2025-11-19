@@ -32,6 +32,14 @@ import secrets
 import uuid
 from api_fallback_strategy import api_fallback
 from monitoring.ml_metrics_logger import log_prediction_metrics
+from volume_indicators import add_volume_indicators
+from market_correlation import calculate_market_metrics
+from sec_edgar_service import get_financial_metrics
+from support_resistance import add_support_resistance_features
+from drawdown_metrics import add_drawdown_features
+from fred_indicators import get_fred_indicators
+from time_features import add_time_features
+from divergence_indicators import add_divergence_features
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -1315,9 +1323,165 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 bb_std = df['Close'].rolling(window=20).std()
                 df['BB_Upper'] = bb_middle + (bb_std * 2)
                 df['BB_Lower'] = bb_middle - (bb_std * 2)
+            
+            # Calculate BB Width (volatility indicator)
+            try:
+                bb_middle = ta.volatility.bollinger_mavg(df['Close'])
+                df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / bb_middle
+            except:
+                # Fallback calculation
+                bb_middle = df['Close'].rolling(window=20).mean()
+                df['BB_Width'] = (df['BB_Upper'] - df['BB_Lower']) / bb_middle
                 
         except Exception as e:
             raise Exception(f"Error preparing features: {str(e)}")
+        
+        # Add Volume Indicators (VWAP, OBV, Accumulation/Distribution)
+        try:
+            df = add_volume_indicators(df)
+        except Exception as e:
+            print(f"[WARNING] Error adding volume indicators: {e}")
+            # Continue without volume indicators if they fail
+        
+        # Calculate Market Correlation (Beta, Correlation with S&P 500)
+        market_metrics = {}
+        try:
+            market_metrics = calculate_market_metrics(ticker, df)
+            # Add beta and correlation as constant features (same for all rows)
+            df['Beta'] = market_metrics.get('beta', np.nan)
+            df['SP500_Correlation'] = market_metrics.get('correlation', np.nan)
+            df['Relative_Volatility'] = market_metrics.get('relative_volatility', np.nan)
+        except Exception as e:
+            print(f"[WARNING] Error calculating market correlation: {e}")
+            df['Beta'] = np.nan
+            df['SP500_Correlation'] = np.nan
+            df['Relative_Volatility'] = np.nan
+        
+        # Add SEC EDGAR Fundamental Data
+        fundamental_data = {}
+        try:
+            fundamental_data = get_financial_metrics(ticker)
+            # Add fundamental features as constants (same for all rows)
+            if fundamental_data:
+                df['Revenue_Growth'] = fundamental_data.get('revenue_growth', np.nan)
+                df['Profit_Margin'] = fundamental_data.get('profit_margin', np.nan)
+                df['Debt_to_Assets'] = fundamental_data.get('debt_to_assets', np.nan)
+                # Normalize revenue and net income by current price for feature scaling
+                if 'revenue' in fundamental_data and fundamental_data.get('revenue'):
+                    df['Revenue_Per_Share'] = fundamental_data['revenue'] / 1000000  # Scale to millions
+                if 'net_income' in fundamental_data and fundamental_data.get('net_income'):
+                    df['Net_Income_Per_Share'] = fundamental_data['net_income'] / 1000000  # Scale to millions
+            else:
+                df['Revenue_Growth'] = np.nan
+                df['Profit_Margin'] = np.nan
+                df['Debt_to_Assets'] = np.nan
+                df['Revenue_Per_Share'] = np.nan
+                df['Net_Income_Per_Share'] = np.nan
+        except Exception as e:
+            print(f"[WARNING] Error fetching SEC EDGAR data: {e}")
+            df['Revenue_Growth'] = np.nan
+            df['Profit_Margin'] = np.nan
+            df['Debt_to_Assets'] = np.nan
+            df['Revenue_Per_Share'] = np.nan
+            df['Net_Income_Per_Share'] = np.nan
+        
+        # Add Support & Resistance Levels
+        try:
+            df = add_support_resistance_features(df)
+        except Exception as e:
+            print(f"[WARNING] Error adding support/resistance features: {e}")
+        
+        # Add Drawdown & Risk Metrics
+        try:
+            df = add_drawdown_features(df)
+        except Exception as e:
+            print(f"[WARNING] Error adding drawdown metrics: {e}")
+        
+        # Add FRED Economic Indicators
+        fred_indicators = {}
+        try:
+            fred_indicators = get_fred_indicators()
+            # Add as constant features (same for all rows)
+            df['Fed_Funds_Rate'] = fred_indicators.get('fed_funds_rate', np.nan)
+            df['Fed_Funds_Rate_Change'] = fred_indicators.get('fed_funds_rate_change', np.nan)
+            df['Inflation_Rate'] = fred_indicators.get('inflation_rate', np.nan)
+            df['Unemployment_Rate'] = fred_indicators.get('unemployment_rate', np.nan)
+            df['Unemployment_Change'] = fred_indicators.get('unemployment_change', np.nan)
+            df['GDP_Growth'] = fred_indicators.get('gdp_growth', np.nan)
+            df['VIX'] = fred_indicators.get('vix', np.nan)
+            df['VIX_Change'] = fred_indicators.get('vix_change', np.nan)
+        except Exception as e:
+            print(f"[WARNING] Error fetching FRED indicators: {e}")
+            df['Fed_Funds_Rate'] = np.nan
+            df['Fed_Funds_Rate_Change'] = np.nan
+            df['Inflation_Rate'] = np.nan
+            df['Unemployment_Rate'] = np.nan
+            df['Unemployment_Change'] = np.nan
+            df['GDP_Growth'] = np.nan
+            df['VIX'] = np.nan
+            df['VIX_Change'] = np.nan
+        
+        # Add Time-Based Features
+        try:
+            df = add_time_features(df, ticker)
+        except Exception as e:
+            print(f"[WARNING] Error adding time features: {e}")
+        
+        # Add Divergence Indicators
+        try:
+            df = add_divergence_features(df)
+        except Exception as e:
+            print(f"[WARNING] Error adding divergence indicators: {e}")
+        
+        # Add News Sentiment Features
+        sentiment_data = {}
+        try:
+            # Get sentiment from news (if available)
+            if NEWSAPI_AVAILABLE:
+                try:
+                    news_data = get_news_for_ticker(ticker, hours_back=168)  # Last 7 days
+                    if news_data and news_data.get('sentiment_scores'):
+                        sentiment_scores = news_data['sentiment_scores']
+                        # Average sentiment scores
+                        df['News_Sentiment_7d'] = sentiment_scores.get('avg_sentiment', np.nan)
+                        df['News_Sentiment_Positive'] = sentiment_scores.get('positive_ratio', np.nan)
+                        df['News_Sentiment_Negative'] = sentiment_scores.get('negative_ratio', np.nan)
+                        df['News_Volume'] = news_data.get('total_articles', 0)
+                    else:
+                        df['News_Sentiment_7d'] = np.nan
+                        df['News_Sentiment_Positive'] = np.nan
+                        df['News_Sentiment_Negative'] = np.nan
+                        df['News_Volume'] = 0
+                except Exception as e:
+                    print(f"[WARNING] Error fetching news sentiment: {e}")
+                    df['News_Sentiment_7d'] = np.nan
+                    df['News_Sentiment_Positive'] = np.nan
+                    df['News_Sentiment_Negative'] = np.nan
+                    df['News_Volume'] = 0
+            else:
+                # Use sentiment analysis service as fallback
+                try:
+                    sentiment_result = get_sentiment_analysis(ticker)
+                    if sentiment_result:
+                        df['News_Sentiment_7d'] = sentiment_result.get('sentiment_score', np.nan)
+                        df['News_Sentiment_Positive'] = sentiment_result.get('positive_ratio', np.nan)
+                        df['News_Sentiment_Negative'] = sentiment_result.get('negative_ratio', np.nan)
+                    else:
+                        df['News_Sentiment_7d'] = np.nan
+                        df['News_Sentiment_Positive'] = np.nan
+                        df['News_Sentiment_Negative'] = np.nan
+                    df['News_Volume'] = 0
+                except:
+                    df['News_Sentiment_7d'] = np.nan
+                    df['News_Sentiment_Positive'] = np.nan
+                    df['News_Sentiment_Negative'] = np.nan
+                    df['News_Volume'] = 0
+        except Exception as e:
+            print(f"[WARNING] Error adding sentiment features: {e}")
+            df['News_Sentiment_7d'] = np.nan
+            df['News_Sentiment_Positive'] = np.nan
+            df['News_Sentiment_Negative'] = np.nan
+            df['News_Volume'] = 0
         
         # Create lag features
         try:
@@ -1339,7 +1503,38 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             'SMA_5', 'SMA_10', 'SMA_20', 'SMA_50',
             'EMA_12', 'EMA_26', 'RSI', 'Stoch', 'Williams_R',
             'MACD', 'MACD_Signal', 'MACD_Hist', 'ADX',
-            'BB_Upper', 'BB_Lower', 'BB_Width'
+            'BB_Upper', 'BB_Lower', 'BB_Width',
+            # Volume Indicators
+            'VWAP', 'VWAP_20', 'OBV', 'OBV_ROC', 
+            'AD_Line', 'AD_ROC', 'Volume_ROC',
+            # Market Correlation
+            'Beta', 'SP500_Correlation', 'Relative_Volatility',
+            # Fundamental Data (SEC EDGAR)
+            'Revenue_Growth', 'Profit_Margin', 'Debt_to_Assets',
+            'Revenue_Per_Share', 'Net_Income_Per_Share',
+            # Support & Resistance
+            'Pivot_Point', 'Nearest_Support', 'Nearest_Resistance',
+            'Distance_to_Support_Pct', 'Distance_to_Resistance_Pct',
+            'Support_Touches', 'Resistance_Touches', 'Price_Position_SR',
+            'Support_Strength', 'Resistance_Strength', 'Distance_from_Pivot_Pct',
+            # Drawdown & Risk Metrics
+            'Max_Drawdown', 'Current_Drawdown', 'Drawdown_Duration',
+            'Max_Drawdown_Duration', 'Sharpe_Ratio', 'Sortino_Ratio',
+            'Avg_Recovery_Days', 'Drawdown_Magnitude',
+            # FRED Economic Indicators
+            'Fed_Funds_Rate', 'Inflation_Rate', 'Unemployment_Rate',
+            'GDP_Growth', 'VIX', 'VIX_Change',
+            # Time-Based Features
+            'Day_of_Week', 'Month', 'Quarter', 'Is_Monday', 'Is_Friday',
+            'Is_January', 'Is_December', 'Is_Q1', 'Is_Q4',
+            'Day_of_Week_Sin', 'Day_of_Week_Cos', 'Month_Sin', 'Month_Cos',
+            'Near_Earnings_Season',
+            # Divergence Indicators
+            'Price_Volume_Divergence', 'Price_RSI_Divergence',
+            'Price_MACD_Divergence', 'Volume_Divergence',
+            'Divergence_Score', 'Divergence_Strength',
+            # News Sentiment
+            'News_Sentiment_7d', 'News_Sentiment_Positive', 'News_Sentiment_Negative'
         ]
         # Add lagged features for better prediction accuracy
         for i in range(1, 8):  # Extended lag features for 180-day dataset
@@ -1590,6 +1785,22 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         else:
             risk_assessment = "High Risk"
         
+        # Include market correlation and fundamental data in response
+        enhanced_metadata = {}
+        if market_metrics:
+            enhanced_metadata['market_correlation'] = {
+                "beta": market_metrics.get('beta'),
+                "sp500_correlation": market_metrics.get('correlation'),
+                "relative_volatility": market_metrics.get('relative_volatility')
+            }
+        
+        if fundamental_data:
+            enhanced_metadata['fundamentals'] = {
+                "revenue_growth": fundamental_data.get('revenue_growth'),
+                "profit_margin": fundamental_data.get('profit_margin'),
+                "debt_to_assets": fundamental_data.get('debt_to_assets')
+            }
+        
         response = {
             "ticker": ticker.upper(),
             "prediction_days": days_ahead,
@@ -1604,7 +1815,9 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "model_metadata": {
                 "training_data_points": len(df),
                 "last_training_date": datetime.now().isoformat(),
-                "model_version": "2.0.0"
+                "model_version": "2.2.0",  # Updated with all new features
+                "features_count": len(available_features),
+                "features_used": available_features[:10]  # First 10 features for reference
             },
             # Additional fields for compatibility
             "current_price": round(df['Close'].iloc[-1], 2),
@@ -1622,7 +1835,8 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "data_points": len(df),
             "features_used": len(available_features),
             "future_predictions": future_predictions,
-            "status": "success"
+            "status": "success",
+            **enhanced_metadata  # Include market correlation and fundamentals if available
         }
 
         try:
