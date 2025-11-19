@@ -1,210 +1,120 @@
-# 📊 MONETA Financial Analyzer
+# AI Career Planner — Secrets & Infra Deliverables
 
-A comprehensive financial analysis suite with Streamlit (web), FastAPI (backend), Android (native), and React Native (Expo) mobile apps. Branded as MONETA with a blue/gold theme and consistent icons, splash screens, and UI.
+This package uses **AWS Systems Manager Parameter Store** (FREE alternative to Secrets Manager) for secure secret management, with Terraform infrastructure, secure College Scorecard integration, pre-commit secret scanning, GitHub Actions CI workflow, comprehensive tests, monitoring, and helper scripts.
 
-## ✨ Features
+**Why Parameter Store?** Saves ~$2/month vs Secrets Manager while maintaining the same security. Perfect for simple use cases with 1-2 secrets.
 
-### 🎯 Core Functionality
-- **Stock Analysis**: Comprehensive financial data analysis for any stock ticker
-- **Financial Metrics**: Revenue, Net Income, EBITDA, Free Cash Flow, and more
-- **Growth Analysis**: Year-over-year growth rates and trend analysis
-- **Peer Comparison**: Industry peer analysis with key metrics
-- **Market Overview**: Real-time market indices and trending stocks
-- **Industry Analysis**: Sector-wide performance metrics
- - **Economic Indicators**: FRED-based housing, foreclosure, and consumer spending signals
+IMPORTANT: Do not commit real secret values.
 
-### 📈 Data Visualization
-- Interactive charts using Plotly
-- Financial trend analysis
-- Growth rate comparisons
-- Peer benchmarking charts
-- Industry scatter plots
+## Setting Up the College Scorecard API Key
 
-### 🏗️ Architecture
-- **Frontend**: Streamlit web application
-- **Backend**: FastAPI REST API (`proxy.py`) with multi-API fallback and `/api/system/status`
-- **Android**: Native Kotlin app (`FinancialAnalyzerApp/`), MONETA branding applied
-- **React Native**: Expo app (`FinancialAnalyzerMobile/`) with dark/light themes and branded assets
-- **Data**: Live market data with fallbacks (Yahoo, Tiingo, Alpha Vantage, FRED)
-- **Styling**: Modern, responsive UI with custom CSS and consistent mobile theming
+The College Scorecard API key has been configured in `college_scorecard_api_key.json`. To upload it to AWS Parameter Store (FREE alternative to Secrets Manager):
 
-## 🚀 Quick Start
+### Option 1: Using Python Script (Recommended)
 
-### Prerequisites
-- Python 3.8 or higher
-- pip package manager
-
-### Installation
-
-1. **Clone the repository**
-   ```bash
-   git clone <your-repo-url>
-   cd financial_analyzer_web_latest
-   ```
-
-2. **Install dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-3. **Start the FastAPI backend**
-   ```bash
-   python proxy.py
-   ```
-   The API will be available at `http://localhost:8000`
-
-4. **Start the Streamlit frontend**
-   ```bash
-   streamlit run app.py
-   ```
-   The web app will open at `http://localhost:8501`
-
-## 📁 Project Structure
-
-```
-financial_analyzer_web_latest/
-├── app.py              # Streamlit frontend application
-├── proxy.py            # FastAPI backend server
-├── requirements.txt    # Python dependencies
-├── render.yaml         # Deployment configuration
-└── README.md          # Project documentation
-```
-
-## 🔧 API Endpoints
-
-### Financial Data
-- `GET /api/financials/{ticker}` - Get financial data for a specific ticker
-- `GET /api/peers/{ticker}` - Get peer comparison data
-- `GET /api/market` - Get market overview data
-- `GET /api/industries` - Get industry analysis data
-
-### Utility
-- `GET /` - API information and available endpoints
-- `GET /health` - Health check endpoint
- - `GET /api/system/status` - Integrated API health and rate-limit status
-
-## 💡 Usage Examples
-
-### Analyzing a Stock
-1. Enter a stock ticker (e.g., AAPL, TSLA, MSFT)
-2. Select analysis type
-3. View comprehensive financial metrics
-4. Explore interactive charts and trends
-
-### Market Overview
-1. Click "📊 Market Overview" in the sidebar
-2. View major market indices
-3. Check trending stocks
-4. Monitor market sentiment
-
-### Industry Analysis
-1. Click "🏭 Industry Analysis" in the sidebar
-2. Compare industry P/E ratios
-3. Analyze growth patterns
-4. Identify sector trends
-
-## 🎨 Customization
-
-### Chart Themes
-- Choose from multiple Plotly themes
-- Customize colors and styling
-- Responsive design for all devices
-
-### Data Sources
-- Currently uses generated data for demonstration
-- Easy to integrate with real financial APIs
-- Extensible architecture for additional data sources
-
-## 🔒 Security Features
-
-- CORS middleware for cross-origin requests
-- Input validation and sanitization
-- Error handling and logging
-- Rate limiting ready
-
-## 🚀 Deployment
-
-### Local Development
 ```bash
-# Terminal 1 - Backend
-python proxy.py
+# Install dependencies if needed
+pip install -r requirements.txt
 
-# Terminal 2 - Frontend
-streamlit run app.py
+# Upload the parameter (creates or updates)
+python scripts/upload_secret_to_ssm.py
 ```
 
-### Production Deployment
-The application includes a `render.yaml` file for easy deployment on Render.com:
+The script will automatically:
+- Create the parameter if it doesn't exist
+- Update the parameter if it already exists
+- Use the parameter name from config (default: `/career_planner/college_scorecard_api_key`)
+- **Cost: FREE** (vs ~$2/month for Secrets Manager)
 
-1. Connect your GitHub repository
-2. Render will automatically detect the configuration
-3. Deploy both frontend and backend services
+### Option 2: Using AWS CLI
 
-### Environment Variables
-- `PORT`: Backend server port (default: 8000)
-- `HOST`: Backend server host (default: 0.0.0.0)
-
-## 🧪 Testing
-
-### API Testing
 ```bash
-# Test the API endpoints
-curl http://localhost:8000/health
-curl http://localhost:8000/api/financials/AAPL
+# First, ensure Terraform has been applied to create the parameter resource
+cd terraform
+terraform init
+terraform apply
+
+# Then upload the parameter value
+cd ..
+aws ssm put-parameter \
+  --name "/career_planner/college_scorecard_api_key" \
+  --value "$(cat college_scorecard_api_key.json | jq -r .COLLEGE_SCORECARD_API_KEY)" \
+  --type SecureString \
+  --overwrite
 ```
 
-### Frontend Testing
-- Open the Streamlit app in your browser
-- Test different stock tickers
-- Verify chart interactions
-- Check responsive design
+### Option 3: Using AWS Console
 
-## 🎨 Branding
+1. Navigate to AWS Systems Manager → Parameter Store in your AWS Console
+2. Find or create the parameter named `/career_planner/college_scorecard_api_key`
+3. Set type to `SecureString` and paste the API key value
+4. Save the parameter
 
-- Colors: MONETA Blue `#1E3A8A`, MONETA Gold `#FFD700`
-- Icons/Splash: see `FinancialAnalyzerMobile/assets/` (SVG + generated PNG)
-- Store assets: see `store_assets/feature_graphic.svg`
+**Note:** The secret file `college_scorecard_api_key.json` is excluded from git via `.gitignore` to prevent accidental commits.
 
-## 🔮 Future Enhancements
+## Running the API locally
 
-- [ ] Real-time market data integration
-- [ ] User authentication and portfolios
-- [ ] Advanced technical analysis
-- [ ] Machine learning predictions
-- [ ] Mobile app version
-- [ ] API rate limiting
-- [ ] Database integration
-- [ ] Export functionality
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+uvicorn app.main:app --reload
+```
 
-## 🤝 Contributing
+Environment variables can be configured via `.env` and validated through `app/config.py`.
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+Key endpoints:
+- `GET /` – root metadata
+- `GET /health` – dependency-aware health check
+- `POST|GET /api/v1/colleges/search` – College Scorecard search
 
-## 📄 License
+## Tests & Quality Gates
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+```bash
+pip install -r requirements.txt -r requirements-dev.txt
+pytest --cov=app --cov=lambda --cov=skills --cov=storage
+black --check app lambda skills storage tests
+flake8 app lambda skills storage tests
+mypy app lambda skills storage
+bandit -r app lambda skills storage
+```
 
-## ⚠️ Disclaimer
+The GitHub Actions workflow enforces:
+- Linting (black, flake8, mypy)
+- Tests with coverage
+- Security scanning (detect-secrets, bandit, safety)
 
-This application is for educational and demonstration purposes only. The financial data is generated and should not be used for actual investment decisions. Always consult with qualified financial professionals before making investment decisions.
+## Monitoring & Logging
 
-## 🆘 Support
+- Structured JSON logging with secret masking is available via `app/monitoring.py`.
+- Prometheus metrics are defined for API requests, secret retrievals, and College Scorecard calls; expose them via FastAPI middleware or a dedicated `/metrics` endpoint as needed.
 
-If you encounter any issues:
+## Terraform Deployment
 
-1. Check the console logs for error messages
-2. Verify both backend and frontend are running
-3. Ensure all dependencies are installed
-4. Check the API endpoints are accessible
+```bash
+cd terraform
+cp backend.tf.example backend.tf   # optional remote state
+terraform init
+terraform apply
+```
 
-## 📊 Screenshots
+**Simplified Infrastructure (Using Parameter Store):**
+Provisioned resources:
+- Parameter Store parameter (FREE, encrypted with default AWS key)
+- Optional KMS key (only if `use_custom_kms = true`)
+- Application IAM role & policy
+- Optional CloudWatch log group
 
-*Screenshots will be added here showing the application interface*
+**Cost:** ~$0.05/month (vs ~$2/month with Secrets Manager)
 
----
+**Note:** The simplified version (`main_simplified.tf`) is recommended. If you need Secrets Manager with rotation, use the original `main.tf` and ensure `lambda/rotation_handler.zip` is built.
 
-**Built with ❤️ using Streamlit and FastAPI**
+## Security Scanning
+
+- Secret detection uses `.secrets.baseline` (maintain via `detect-secrets scan --baseline .secrets.baseline`).
+- Logs automatically mask high-entropy strings.
+- CI runs Bandit and Safety; run locally with:
+
+```bash
+detect-secrets scan --baseline .secrets.baseline
+bandit -r app lambda skills storage -ll
+safety check --file requirements.txt --full-report
+```
