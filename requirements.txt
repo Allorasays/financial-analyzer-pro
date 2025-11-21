@@ -17,8 +17,8 @@ PyJWT>=2.8.0
 # Timezone and technical analysis
 pytz>=2023.3
 ta>=0.11.0
-# SEC EDGAR data access
-sec-edgar-downloader>=6.0.0
+# SEC EDGAR data access (compatible with Python 3.11)
+sec-edgar-downloader>=5.0.3
 # ML libraries without GPU dependencies
 # Note: torch/transformers not needed for proxy.py - ML predictions use sklearn only
 vaderSentiment>=3.3.0
