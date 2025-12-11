@@ -1,30 +1,56 @@
-services:
+# Backend API (FastAPI via uvicorn)
   - type: web
-    name: financial-analyzer-final
+    name: moneta-backend-api
     env: python
     plan: free
-    buildCommand: python deploy.py
-    startCommand: python deploy.py
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    startCommand: python -m uvicorn proxy:app --host 0.0.0.0 --port $PORT
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0
+        value: 3.11.9
+      - key: SECRET_KEY
+        generateValue: true
+      - key: ENABLE_TIINGO
+        value: true
+      - key: ENABLE_ALPHA_VANTAGE
+        value: true
+      - key: TIINGO_API_KEY
+        sync: false
+      - key: ALPHAVANTAGE_API_KEY
+        sync: false
+      - key: NEWSAPI_KEY
+        sync: false
+      - key: FRED_API_KEY
+        sync: false
+
+  # Web Dashboard (Streamlit)
+  - type: web
+    name: moneta-web-dashboard
+    env: python
+    plan: free
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
+      - key: API_BASE_URL
+        value: https://moneta-backend-api.onrender.com
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+  # Daily Predictions & Validation Job (runs daily at 6 PM ET / 11 PM UTC after market close)
+  - type: cron
+    name: daily-predictions-validation
+    schedule: "0 23 * * *"  # Daily at 11 PM UTC (6 PM ET)
+    env: python
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    runCommand: python combined_daily_job.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: API_BASE_URL
+        value: https://moneta-backend-api.onrender.com
+      - key: RENDER
+        value: true
