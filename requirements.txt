@@ -26,14 +26,3 @@ vaderSentiment>=3.3.0
 # transformers and torch removed for deployment simplicity
 # ccxt>=4.0.0
 # forex-python>=1.0.0
-
-
-
-
-
-
-
-
-
-
-

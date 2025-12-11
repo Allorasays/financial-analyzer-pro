@@ -3,17 +3,30 @@ services:
     name: financial-analyzer-pro-final
     env: python
     plan: free
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
+    buildCommand: pip install streamlit pandas plotly yfinance numpy requests scikit-learn scipy --no-cache-dir
+    startCommand: streamlit run app_final_enhanced.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.11.0
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-      - key: API_BASE_URL
-        value: https://moneta-backend-api.onrender.com
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
+
+
+
+
+
+
+
+
+
+
+
 
 
 

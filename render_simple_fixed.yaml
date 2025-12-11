@@ -3,13 +3,13 @@ services:
     name: financial-analyzer-pro
     env: python
     plan: free
-    buildCommand: |
-      pip install --upgrade pip
-      pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
+    buildCommand: pip install -r requirements.txt --no-cache-dir
+    startCommand: python -m streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: PORT
+        value: 8501
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
@@ -17,6 +17,4 @@ services:
       - key: STREAMLIT_SERVER_ENABLE_CORS
         value: false
       - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
-        value: false
-      - key: STREAMLIT_BROWSER_GATHER_USAGE_STATS
         value: false
