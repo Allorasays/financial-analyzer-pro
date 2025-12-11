@@ -2882,54 +2882,280 @@ async def export_portfolio_performance(username: str = Depends(verify_token)):
 # Additional endpoints for Android app compatibility
 @app.get("/api/stock/{ticker}")
 async def get_stock_data(ticker: str):
-    """Get basic stock data"""
+    """Get comprehensive stock data for real stock analysis"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         
+        # Helper function to safely get values
+        def safe_get(key, default=None, allow_zero=False):
+            value = info.get(key, default)
+            if value is None or value == '':
+                return None
+            if not allow_zero and value == 0:
+                return None
+            return value
+        
+        # Get real-time quote data
+        try:
+            quote_data = get_real_time_data(ticker)
+        except:
+            quote_data = {}
+        
         return {
             "symbol": ticker.upper(),
-            "company_name": info.get('longName', 'N/A'),
-            "price": info.get('currentPrice', info.get('regularMarketPrice', 0)),
-            "change_percent": info.get('regularMarketChangePercent', 0),
-            "volume": info.get('volume', 0),
-            "market_cap": info.get('marketCap', 0),
-            "pe": info.get('trailingPE', 0),
-            "eps": info.get('trailingEps', 0)
+            "company_name": info.get('longName') or info.get('shortName') or None,
+            "industry": info.get('industry') or None,
+            "sector": info.get('sector') or None,
+            
+            # Price Data
+            "price": safe_get('currentPrice') or safe_get('regularMarketPrice') or quote_data.get('price'),
+            "previous_close": safe_get('previousClose'),
+            "change": safe_get('regularMarketChange') or quote_data.get('change'),
+            "change_percent": safe_get('regularMarketChangePercent') or quote_data.get('change_percent'),
+            "day_low": safe_get('dayLow'),
+            "day_high": safe_get('dayHigh'),
+            "52_week_low": safe_get('fiftyTwoWeekLow'),
+            "52_week_high": safe_get('fiftyTwoWeekHigh'),
+            
+            # Market Data
+            "market_cap": safe_get('marketCap'),
+            "volume": safe_get('volume', allow_zero=True) or quote_data.get('volume'),
+            "average_volume": safe_get('averageVolume', allow_zero=True),
+            "shares_outstanding": safe_get('sharesOutstanding'),
+            "float_shares": safe_get('floatShares'),
+            
+            # Valuation
+            "pe": safe_get('trailingPE'),
+            "forward_pe": safe_get('forwardPE'),
+            "eps": safe_get('trailingEps'),
+            "forward_eps": safe_get('forwardEps'),
+            "peg_ratio": safe_get('pegRatio'),
+            "price_to_book": safe_get('priceToBook'),
+            "price_to_sales": safe_get('priceToSalesTrailing12Months'),
+            
+            # Financials
+            "revenue": safe_get('totalRevenue'),
+            "net_income": safe_get('netIncomeToCommon') or safe_get('netIncome'),
+            "ebitda": safe_get('ebitda'),
+            "free_cash_flow": safe_get('freeCashflow'),
+            
+            # Ratios
+            "debt_to_equity": safe_get('debtToEquity'),
+            "current_ratio": safe_get('currentRatio'),
+            "quick_ratio": safe_get('quickRatio'),
+            "return_on_equity": safe_get('returnOnEquity'),
+            "return_on_assets": safe_get('returnOnAssets'),
+            
+            # Margins
+            "gross_margin": safe_get('grossMargins'),
+            "operating_margin": safe_get('operatingMargins'),
+            "profit_margin": safe_get('profitMargins'),
+            
+            # Growth
+            "revenue_growth": safe_get('revenueGrowth'),
+            "earnings_growth": safe_get('earningsGrowth'),
+            
+            # Dividends
+            "dividend_yield": safe_get('dividendYield'),
+            "dividend_rate": safe_get('dividendRate'),
+            "payout_ratio": safe_get('payoutRatio'),
+            
+            # Risk
+            "beta": safe_get('beta'),
+            
+            # Additional
+            "book_value": safe_get('bookValue'),
+            "enterprise_value": safe_get('enterpriseValue'),
+            "target_price": safe_get('targetMeanPrice'),
+            "recommendation": info.get('recommendationKey'),
+            
+            "timestamp": datetime.now().isoformat(),
+            "data_source": quote_data.get('data_source', 'yfinance')
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching stock data: {str(e)}")
 
 @app.get("/api/financials/{ticker}")
 async def get_financial_metrics(ticker: str):
-    """Get financial metrics"""
+    """Get comprehensive financial metrics - all data points for real stock analysis"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        return {
-            "revenue": info.get('totalRevenue', 0),
-            "net_income": info.get('netIncomeToCommon', 0),
-            "ebitda": info.get('ebitda', 0),
-            "free_cash_flow": info.get('freeCashflow', 0),
-            "debt_to_equity": info.get('debtToEquity', 0),
-            "current_ratio": info.get('currentRatio', 0)
+        # Helper function to safely get values (returns None for missing data, but allows 0 for valid metrics)
+        def safe_get(key, default=None, allow_zero=False):
+            value = info.get(key, default)
+            # Return None for missing/invalid values, but allow 0 if explicitly requested (e.g., for volume)
+            if value is None or value == '':
+                return None
+            if not allow_zero and value == 0:
+                # For most financial metrics, 0 means missing data
+                return None
+            return value
+        
+        # Comprehensive financial data
+        financial_data = {
+            # Company Information
+            "ticker": ticker.upper(),
+            "company_name": info.get('longName') or info.get('shortName') or None,
+            "industry": info.get('industry') or None,
+            "sector": info.get('sector') or None,
+            "website": info.get('website') or None,
+            "description": info.get('longBusinessSummary') or None,
+            
+            # Market Data
+            "current_price": safe_get('currentPrice') or safe_get('regularMarketPrice'),
+            "previous_close": safe_get('previousClose'),
+            "market_cap": safe_get('marketCap'),
+            "enterprise_value": safe_get('enterpriseValue'),
+            "shares_outstanding": safe_get('sharesOutstanding'),
+            "float_shares": safe_get('floatShares'),
+            "shares_short": safe_get('sharesShort'),
+            "short_ratio": safe_get('shortRatio'),
+            "52_week_high": safe_get('fiftyTwoWeekHigh'),
+            "52_week_low": safe_get('fiftyTwoWeekLow'),
+            
+            # Valuation Ratios
+            "pe_ratio": safe_get('trailingPE'),
+            "forward_pe": safe_get('forwardPE'),
+            "peg_ratio": safe_get('pegRatio'),
+            "price_to_book": safe_get('priceToBook'),
+            "price_to_sales": safe_get('priceToSalesTrailing12Months'),
+            "enterprise_value_to_revenue": safe_get('enterpriseToRevenue'),
+            "enterprise_value_to_ebitda": safe_get('enterpriseToEbitda'),
+            "ev_to_revenue": safe_get('enterpriseToRevenue'),
+            "ev_to_ebitda": safe_get('enterpriseToEbitda'),
+            
+            # Profitability Metrics
+            "revenue": safe_get('totalRevenue'),
+            "revenue_per_share": safe_get('revenuePerShare'),
+            "revenue_growth": safe_get('revenueGrowth'),
+            "net_income": safe_get('netIncomeToCommon') or safe_get('netIncome'),
+            "net_income_common": safe_get('netIncomeToCommon'),
+            "earnings_per_share": safe_get('trailingEps') or safe_get('epsTrailingTwelveMonths'),
+            "forward_eps": safe_get('forwardEps'),
+            "earnings_growth": safe_get('earningsGrowth'),
+            "earnings_quarterly_growth": safe_get('earningsQuarterlyGrowth'),
+            
+            # Margins
+            "gross_margin": safe_get('grossMargins'),
+            "operating_margin": safe_get('operatingMargins'),
+            "profit_margin": safe_get('profitMargins'),
+            "ebitda_margin": safe_get('ebitdaMargins') if safe_get('ebitdaMargins') else None,
+            
+            # Cash Flow
+            "ebitda": safe_get('ebitda'),
+            "free_cash_flow": safe_get('freeCashflow'),
+            "operating_cash_flow": safe_get('operatingCashflow'),
+            "cash_per_share": safe_get('totalCashPerShare'),
+            
+            # Returns
+            "return_on_equity": safe_get('returnOnEquity'),
+            "return_on_assets": safe_get('returnOnAssets'),
+            "return_on_invested_capital": safe_get('returnOnInvestedCapital'),
+            
+            # Debt & Liquidity
+            "debt_to_equity": safe_get('debtToEquity'),
+            "debt_to_assets": safe_get('debtToAssets'),
+            "current_ratio": safe_get('currentRatio'),
+            "quick_ratio": safe_get('quickRatio'),
+            "cash_ratio": safe_get('cashRatio'),
+            "total_debt": safe_get('totalDebt'),
+            "total_cash": safe_get('totalCash'),
+            "total_cash_per_share": safe_get('totalCashPerShare'),
+            
+            # Dividends
+            "dividend_yield": safe_get('dividendYield'),
+            "dividend_rate": safe_get('dividendRate'),
+            "dividend_per_share": safe_get('trailingAnnualDividendRate'),
+            "payout_ratio": safe_get('payoutRatio'),
+            "ex_dividend_date": info.get('exDividendDate'),
+            "dividend_date": info.get('dividendDate'),
+            
+            # Growth Metrics
+            "revenue_growth": safe_get('revenueGrowth'),
+            "earnings_growth": safe_get('earningsGrowth'),
+            "earnings_quarterly_growth": safe_get('earningsQuarterlyGrowth'),
+            "revenue_per_share_growth": safe_get('revenuePerShare'),
+            
+            # Trading Metrics
+            "beta": safe_get('beta'),
+            "volume": safe_get('volume', allow_zero=True),
+            "average_volume": safe_get('averageVolume', allow_zero=True),
+            "average_volume_10days": safe_get('averageVolume10days', allow_zero=True),
+            "bid": safe_get('bid'),
+            "ask": safe_get('ask'),
+            "bid_size": safe_get('bidSize'),
+            "ask_size": safe_get('askSize'),
+            "day_low": safe_get('dayLow'),
+            "day_high": safe_get('dayHigh'),
+            "open": safe_get('open'),
+            
+            # Analyst Data
+            "target_high_price": safe_get('targetHighPrice'),
+            "target_low_price": safe_get('targetLowPrice'),
+            "target_mean_price": safe_get('targetMeanPrice'),
+            "target_median_price": safe_get('targetMedianPrice'),
+            "recommendation_mean": info.get('recommendationMean'),
+            "recommendation_key": info.get('recommendationKey'),
+            "number_of_analyst_opinions": safe_get('numberOfAnalystOpinions'),
+            
+            # Additional Metrics
+            "book_value": safe_get('bookValue'),
+            "price_to_book": safe_get('priceToBook'),
+            "price_to_sales_trailing_12months": safe_get('priceToSalesTrailing12Months'),
+            "enterprise_value": safe_get('enterpriseValue'),
+            "enterprise_value_to_revenue": safe_get('enterpriseToRevenue'),
+            "enterprise_value_to_ebitda": safe_get('enterpriseToEbitda'),
+            "held_percent_insiders": safe_get('heldPercentInsiders'),
+            "held_percent_institutions": safe_get('heldPercentInstitutions'),
+            
+            # Timestamps
+            "timestamp": datetime.now().isoformat(),
+            "data_source": "yfinance"
         }
+        
+        # Remove None values to reduce payload size (frontend can handle missing keys)
+        # But keep structure for easier frontend parsing
+        return financial_data
+        
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching financial metrics: {str(e)}")
 
 @app.get("/api/peers/{ticker}")
 async def get_peer_comparison(ticker: str):
-    """Get peer comparison data"""
+    """Get comprehensive peer comparison data"""
     try:
         stock = yf.Ticker(ticker)
         info = stock.info
         
+        def safe_get(key, default=None):
+            value = info.get(key, default)
+            if value == 0 or value == '' or value is None:
+                return None
+            return value
+        
         return {
-            "industry": info.get('industry', 'N/A'),
-            "sector": info.get('sector', 'N/A'),
-            "avg_pe": info.get('trailingPE', 0),
-            "avg_growth": info.get('earningsGrowth', 0)
+            "ticker": ticker.upper(),
+            "industry": info.get('industry') or None,
+            "sector": info.get('sector') or None,
+            "industry_average_pe": safe_get('trailingPE'),
+            "industry_average_forward_pe": safe_get('forwardPE'),
+            "industry_earnings_growth": safe_get('earningsGrowth'),
+            "industry_revenue_growth": safe_get('revenueGrowth'),
+            "industry_profit_margin": safe_get('profitMargins'),
+            "industry_operating_margin": safe_get('operatingMargins'),
+            "industry_gross_margin": safe_get('grossMargins'),
+            "industry_roe": safe_get('returnOnEquity'),
+            "industry_roa": safe_get('returnOnAssets'),
+            "industry_debt_to_equity": safe_get('debtToEquity'),
+            "industry_current_ratio": safe_get('currentRatio'),
+            "industry_price_to_book": safe_get('priceToBook'),
+            "industry_price_to_sales": safe_get('priceToSalesTrailing12Months'),
+            "industry_dividend_yield": safe_get('dividendYield'),
+            "industry_beta": safe_get('beta'),
+            "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching peer comparison: {str(e)}")
@@ -3367,13 +3593,21 @@ async def get_comprehensive_analysis(ticker: str, prediction_days: int = 30):
                 "factors": []
             }
         
-        # Get basic stock data
+        # Get comprehensive stock and financial data
+        try:
+            # Get financial metrics (comprehensive)
+            financial_metrics_response = await get_financial_metrics(ticker)
+            financial_data = financial_metrics_response if isinstance(financial_metrics_response, dict) else {}
+        except:
+            financial_data = {}
+        
+        # Get basic stock data for price info
         stock = yf.Ticker(ticker)
         hist = stock.history(period="1mo")
         
-        current_price = hist['Close'].iloc[-1] if not hist.empty else 0.0
-        price_change = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else 0.0
-        price_change_percent = (price_change / hist['Close'].iloc[-2] * 100) if len(hist) > 1 and hist['Close'].iloc[-2] != 0 else 0.0
+        current_price = hist['Close'].iloc[-1] if not hist.empty else (financial_data.get('current_price') or 0.0)
+        price_change = hist['Close'].iloc[-1] - hist['Close'].iloc[-2] if len(hist) > 1 else (financial_data.get('change') or 0.0)
+        price_change_percent = (price_change / hist['Close'].iloc[-2] * 100) if len(hist) > 1 and hist['Close'].iloc[-2] != 0 else (financial_data.get('change_percent') or 0.0)
         
         # Combine all analysis
         comprehensive_data = {
@@ -3381,6 +3615,7 @@ async def get_comprehensive_analysis(ticker: str, prediction_days: int = 30):
             "current_price": round(current_price, 2),
             "price_change": round(price_change, 2),
             "price_change_percent": round(price_change_percent, 2),
+            "financial_metrics": financial_data,  # Include comprehensive financial data
             "ml_predictions": ml_predictions,
             "sentiment_analysis": sentiment_data,
             "economic_indicators": economic_indicators,
