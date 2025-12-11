@@ -1,41 +1,14 @@
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
+import yfinance as yf
 import numpy as np
 from datetime import datetime, timedelta
 import time
 import json
-import os
 import warnings
 warnings.filterwarnings('ignore')
-
-# Get API base URL from environment variable (for production) or use default (for local dev)
-API_BASE_URL = os.getenv('API_BASE_URL', 'http://localhost:8000')
-
-# Lazy import heavy libraries only when needed
-plotly_go = None
-plotly_px = None
-yfinance = None
-
-def get_plotly_go():
-    global plotly_go
-    if plotly_go is None:
-        import plotly.graph_objects as go
-        plotly_go = go
-    return plotly_go
-
-def get_plotly_px():
-    global plotly_px
-    if plotly_px is None:
-        import plotly.express as px
-        plotly_px = px
-    return plotly_px
-
-def get_yfinance():
-    global yfinance
-    if yfinance is None:
-        import yfinance as yf
-        yfinance = yf
-    return yfinance
 
 # Simple cache implementation
 class SimpleCache:
@@ -80,14 +53,6 @@ try:
 except ImportError as e:
     st.warning(f"Real-time features not available: {str(e)}")
     REALTIME_AVAILABLE = False
-
-# Global Markets, Forex, and Crypto imports with graceful fallbacks
-try:
-    from global_markets_service import global_markets_service
-    GLOBAL_MARKETS_AVAILABLE = True
-except ImportError as e:
-    st.warning(f"Global Markets features not available: {str(e)}")
-    GLOBAL_MARKETS_AVAILABLE = False
 
 # Enhanced ML imports with graceful fallbacks
 try:
@@ -225,7 +190,6 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
     
     # Method 1: Try yfinance with extended period for ML
     try:
-        yf = get_yfinance()  # Lazy load yfinance
         ticker = yf.Ticker(symbol)
         
         # For ML predictions, always try to get at least 1 year of data
@@ -260,44 +224,44 @@ def get_market_data(symbol: str, period: str = "1mo", min_days: int = 60):
         dates = pd.date_range(start=datetime.now() - timedelta(days=days_needed), end=datetime.now(), freq='D')
         np.random.seed(hash(symbol) % 2**32)
     
-        # More realistic base prices for common symbols
-        symbol_prices = {
-            'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
-            'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
-            'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
-        }
-        base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
+    # More realistic base prices for common symbols
+    symbol_prices = {
+        'AAPL': 150, 'MSFT': 300, 'GOOGL': 2500, 'AMZN': 3000,
+        'TSLA': 200, 'META': 300, 'NVDA': 400, 'NFLX': 400,
+        'BRK-B': 350, 'JPM': 150, 'JNJ': 160, 'V': 250
+    }
+    base_price = symbol_prices.get(symbol.upper(), 100 + (hash(symbol) % 1000))
+    
+    # Generate realistic price movement with quarterly patterns
+    price_changes = np.random.normal(0, 0.015, len(dates))
+    
+    # Add some quarterly seasonality
+    for i in range(len(dates)):
+        quarter = (dates[i].month - 1) // 3
+        if quarter == 0:  # Q1 - often positive
+            price_changes[i] += np.random.normal(0.005, 0.01)
+        elif quarter == 1:  # Q2 - mixed
+            price_changes[i] += np.random.normal(0.002, 0.008)
+        elif quarter == 2:  # Q3 - often volatile
+            price_changes[i] += np.random.normal(0, 0.02)
+        else:  # Q4 - often strong
+            price_changes[i] += np.random.normal(0.008, 0.012)
         
-        # Generate realistic price movement with quarterly patterns
-        price_changes = np.random.normal(0, 0.015, len(dates))
-        
-        # Add some quarterly seasonality
-        for i in range(len(dates)):
-            quarter = (dates[i].month - 1) // 3
-            if quarter == 0:  # Q1 - often positive
-                price_changes[i] += np.random.normal(0.005, 0.01)
-            elif quarter == 1:  # Q2 - mixed
-                price_changes[i] += np.random.normal(0.002, 0.008)
-            elif quarter == 2:  # Q3 - often volatile
-                price_changes[i] += np.random.normal(0, 0.02)
-            else:  # Q4 - often strong
-                price_changes[i] += np.random.normal(0.008, 0.012)
-        
-        prices = [base_price]
-        for change in price_changes[1:]:
-            prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
-        
-        data = pd.DataFrame({
-            'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
-            'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
-            'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
-            'Close': prices,
-            'Volume': np.random.randint(1000000, 15000000, len(dates))
-        }, index=dates)
-        
-        # Cache for 3 minutes (shorter for demo data)
-        cache.set(cache_key, data)
-        return data
+    prices = [base_price]
+    for change in price_changes[1:]:
+        prices.append(max(prices[-1] * (1 + change), 1.0))  # Ensure positive prices
+    
+    data = pd.DataFrame({
+        'Open': [p * (1 + np.random.normal(0, 0.008)) for p in prices],
+        'High': [p * (1 + abs(np.random.normal(0, 0.015))) for p in prices],
+        'Low': [p * (1 - abs(np.random.normal(0, 0.015))) for p in prices],
+        'Close': prices,
+        'Volume': np.random.randint(1000000, 15000000, len(dates))
+    }, index=dates)
+    
+    # Cache for 3 minutes (shorter for demo data)
+    cache.set(cache_key, data)
+    return data
     
     # Final fallback - return None
     return None
@@ -402,21 +366,14 @@ def calculate_risk_metrics(data):
     return risk_metrics
 
 def get_market_overview():
-    """Get real-time market overview with fallback data"""
-    symbols_data = [
-        {'symbol': '^GSPC', 'name': 'S&P 500', 'base_price': 4500},
-        {'symbol': '^IXIC', 'name': 'NASDAQ', 'base_price': 14000},
-        {'symbol': '^DJI', 'name': 'Dow Jones', 'base_price': 35000},
-        {'symbol': '^VIX', 'name': 'VIX', 'base_price': 20}
-    ]
+    """Get real-time market overview"""
+    symbols = ['^GSPC', '^IXIC', '^DJI', '^VIX']
     overview = {}
     
-    for market in symbols_data:
-        symbol = market['symbol']
+    for symbol in symbols:
         try:
-            yf = get_yfinance()  # Lazy load yfinance
             ticker = yf.Ticker(symbol)
-            hist = ticker.history(period="2d", timeout=10)
+            hist = ticker.history(period="2d")
             
             if not hist.empty and len(hist) >= 2:
                 current_price = hist['Close'].iloc[-1]
@@ -429,22 +386,8 @@ def get_market_overview():
                     'change': change,
                     'change_percent': change_percent
                 }
-            else:
-                # Fallback to demo data if no data returned
-                raise Exception("No data returned")
         except Exception as e:
-            # Fallback to demo data when API fails
-            np.random.seed(hash(symbol) % 2**32)
-            base_price = market['base_price']
-            change_percent = np.random.normal(0, 1.5)  # Random change around 0%
-            change = base_price * (change_percent / 100)
-            current_price = base_price + change
-            
-            overview[symbol] = {
-                'price': current_price,
-                'change': change,
-                'change_percent': change_percent
-            }
+            st.warning(f"Could not fetch {symbol}: {str(e)}")
     
     return overview
 
@@ -470,7 +413,6 @@ def get_global_markets_overview():
     
     for market in market_indices:
         try:
-            yf = get_yfinance()  # Lazy load yfinance
             ticker = yf.Ticker(market['symbol'])
             hist = ticker.history(period="2d", timeout=10)
             
@@ -504,6 +446,274 @@ def get_global_markets_overview():
             })
     
     return markets
+
+def get_forex_data():
+    """Get major forex currency pairs data"""
+    forex_pairs = []
+    
+    # Major forex pairs
+    forex_symbols = [
+        {'symbol': 'EURUSD=X', 'name': 'EUR/USD', 'base_price': 1.08},
+        {'symbol': 'GBPUSD=X', 'name': 'GBP/USD', 'base_price': 1.27},
+        {'symbol': 'USDJPY=X', 'name': 'USD/JPY', 'base_price': 150.0},
+        {'symbol': 'USDCHF=X', 'name': 'USD/CHF', 'base_price': 0.88},
+        {'symbol': 'AUDUSD=X', 'name': 'AUD/USD', 'base_price': 0.66},
+        {'symbol': 'USDCAD=X', 'name': 'USD/CAD', 'base_price': 1.37},
+        {'symbol': 'NZDUSD=X', 'name': 'NZD/USD', 'base_price': 0.61},
+        {'symbol': 'EURGBP=X', 'name': 'EUR/GBP', 'base_price': 0.85},
+        {'symbol': 'EURJPY=X', 'name': 'EUR/JPY', 'base_price': 162.0},
+        {'symbol': 'GBPJPY=X', 'name': 'GBP/JPY', 'base_price': 190.5}
+    ]
+    
+    for pair in forex_symbols:
+        try:
+            ticker = yf.Ticker(pair['symbol'])
+            hist = ticker.history(period="2d", timeout=10)
+            
+            if not hist.empty and len(hist) >= 2:
+                current_price = hist['Close'].iloc[-1]
+                previous_price = hist['Close'].iloc[-2]
+                change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                forex_pairs.append({
+                    'name': pair['name'],
+                    'symbol': pair['symbol'],
+                    'price': current_price,
+                    'change': change,
+                    'change_percent': change_percent
+                })
+        except Exception as e:
+            # Fallback to demo data
+            np.random.seed(hash(pair['symbol']) % 2**32)
+            base_price = pair['base_price']
+            change_percent = np.random.normal(0, 0.5)  # Smaller changes for forex
+            change = base_price * (change_percent / 100)
+            current_price = base_price + change
+            
+            forex_pairs.append({
+                'name': pair['name'],
+                'symbol': pair['symbol'],
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            })
+    
+    return forex_pairs
+
+def get_crypto_data():
+    """Get major cryptocurrency data"""
+    crypto_data = []
+    
+    # Major cryptocurrencies
+    crypto_symbols = [
+        {'symbol': 'BTC-USD', 'name': 'Bitcoin', 'base_price': 45000},
+        {'symbol': 'ETH-USD', 'name': 'Ethereum', 'base_price': 2800},
+        {'symbol': 'BNB-USD', 'name': 'Binance Coin', 'base_price': 320},
+        {'symbol': 'XRP-USD', 'name': 'XRP', 'base_price': 0.62},
+        {'symbol': 'ADA-USD', 'name': 'Cardano', 'base_price': 0.48},
+        {'symbol': 'SOL-USD', 'name': 'Solana', 'base_price': 95},
+        {'symbol': 'DOT-USD', 'name': 'Polkadot', 'base_price': 7.2},
+        {'symbol': 'DOGE-USD', 'name': 'Dogecoin', 'base_price': 0.08},
+        {'symbol': 'AVAX-USD', 'name': 'Avalanche', 'base_price': 38},
+        {'symbol': 'MATIC-USD', 'name': 'Polygon', 'base_price': 0.85}
+    ]
+    
+    for crypto in crypto_symbols:
+        try:
+            ticker = yf.Ticker(crypto['symbol'])
+            hist = ticker.history(period="2d", timeout=10)
+            
+            if not hist.empty and len(hist) >= 2:
+                current_price = hist['Close'].iloc[-1]
+                previous_price = hist['Close'].iloc[-2]
+                change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                crypto_data.append({
+                    'name': crypto['name'],
+                    'symbol': crypto['symbol'],
+                    'price': current_price,
+                    'change': change,
+                    'change_percent': change_percent
+                })
+        except Exception as e:
+            # Fallback to demo data
+            np.random.seed(hash(crypto['symbol']) % 2**32)
+            base_price = crypto['base_price']
+            change_percent = np.random.normal(0, 5)  # Higher volatility for crypto
+            change = base_price * (change_percent / 100)
+            current_price = base_price + change
+            
+            crypto_data.append({
+                'name': crypto['name'],
+                'symbol': crypto['symbol'],
+                'price': current_price,
+                'change': change,
+                'change_percent': change_percent
+            })
+    
+    return crypto_data
+
+def analyze_sentiment(text):
+    """Analyze sentiment using available libraries"""
+    sentiment_results = {}
+    
+    if TEXTBLOB_AVAILABLE:
+        try:
+            blob = TextBlob(text)
+            sentiment_results['textblob'] = {
+                'polarity': blob.sentiment.polarity,
+                'subjectivity': blob.sentiment.subjectivity,
+                'label': 'Positive' if blob.sentiment.polarity > 0 else 'Negative' if blob.sentiment.polarity < 0 else 'Neutral'
+            }
+        except Exception as e:
+            sentiment_results['textblob'] = {'error': str(e)}
+    
+    if VADER_AVAILABLE:
+        try:
+            analyzer = SentimentIntensityAnalyzer()
+            scores = analyzer.polarity_scores(text)
+            sentiment_results['vader'] = {
+                'compound': scores['compound'],
+                'positive': scores['pos'],
+                'negative': scores['neg'],
+                'neutral': scores['neu'],
+                'label': 'Positive' if scores['compound'] > 0.05 else 'Negative' if scores['compound'] < -0.05 else 'Neutral'
+            }
+        except Exception as e:
+            sentiment_results['vader'] = {'error': str(e)}
+    
+    return sentiment_results
+
+def enhanced_ml_analysis(data, symbol):
+    """Perform enhanced ML analysis with available libraries"""
+    results = {
+        'basic_analysis': {},
+        'sentiment_analysis': {},
+        'advanced_metrics': {}
+    }
+    
+    # Basic analysis
+    if not data.empty:
+        results['basic_analysis'] = {
+            'current_price': data['Close'].iloc[-1],
+            'volatility': data['Close'].pct_change().std() * 100,
+            'trend': 'Up' if data['Close'].iloc[-1] > data['Close'].iloc[-5] else 'Down',
+            'volume_avg': data['Volume'].mean()
+        }
+    
+    # Sentiment analysis on symbol name and description
+    symbol_description = f"Analysis of {symbol} stock performance and market trends"
+    results['sentiment_analysis'] = analyze_sentiment(symbol_description)
+    
+    # Advanced metrics
+    if len(data) > 20:
+        returns = data['Close'].pct_change().dropna()
+        results['advanced_metrics'] = {
+            'sharpe_ratio': returns.mean() / returns.std() * np.sqrt(252) if returns.std() > 0 else 0,
+            'max_drawdown': (data['Close'] / data['Close'].cummax() - 1).min() * 100,
+            'volatility_annualized': returns.std() * np.sqrt(252) * 100
+        }
+    
+    return results
+
+def predict_price_ml(data, symbol, periods=5):
+    """Predict future prices using machine learning"""
+    if not SKLEARN_AVAILABLE or data is None or data.empty or len(data) < 30:
+        return None, "Insufficient data or ML library not available"
+    
+    try:
+        # Prepare features
+        df = data.copy()
+        
+        # Technical indicators
+        df['SMA_5'] = df['Close'].rolling(window=5).mean()
+        df['SMA_10'] = df['Close'].rolling(window=10).mean()
+        df['SMA_20'] = df['Close'].rolling(window=20).mean()
+        df['RSI'] = calculate_rsi(df['Close'])
+        df['Volume_MA'] = df['Volume'].rolling(window=10).mean()
+        
+        # Price features
+        df['Price_Change'] = df['Close'].pct_change()
+        df['High_Low_Ratio'] = df['High'] / df['Low']
+        df['Volume_Price_Trend'] = df['Volume'] * df['Price_Change']
+        
+        # Remove NaN values
+        df = df.dropna()
+        
+        if len(df) < 20:
+            return None, "Insufficient data after feature engineering"
+        
+        # Prepare training data
+        features = ['SMA_5', 'SMA_10', 'SMA_20', 'RSI', 'Volume_MA', 
+                   'Price_Change', 'High_Low_Ratio', 'Volume_Price_Trend']
+        X = df[features].values
+        y = df['Close'].values
+        
+        # Use last 80% for training, 20% for validation
+        split_idx = int(len(X) * 0.8)
+        X_train, X_test = X[:split_idx], X[split_idx:]
+        y_train, y_test = y[:split_idx], y[split_idx:]
+        
+        # Scale features
+        scaler = StandardScaler()
+        X_train_scaled = scaler.fit_transform(X_train)
+        X_test_scaled = scaler.transform(X_test)
+        
+        # Train model
+        model = RandomForestRegressor(n_estimators=100, random_state=42)
+        model.fit(X_train_scaled, y_train)
+        
+        # Make predictions
+        last_features = X[-1:].reshape(1, -1)
+        last_features_scaled = scaler.transform(last_features)
+        
+        predictions = []
+        current_features = last_features_scaled.copy()
+        
+        for _ in range(periods):
+            pred_price = model.predict(current_features)[0]
+            predictions.append(pred_price)
+            
+            # Update features for next prediction (simplified)
+            new_features = current_features.copy()
+            new_features[0, 0] = pred_price  # Update SMA_5
+            new_features[0, 1] = (new_features[0, 0] + current_features[0, 0]) / 2  # Update SMA_10
+            new_features[0, 2] = (new_features[0, 1] + current_features[0, 1]) / 2  # Update SMA_20
+            new_features[0, 5] = (pred_price - current_features[0, 0]) / current_features[0, 0]  # Price change
+            
+            current_features = new_features
+        
+        # Generate dates
+        last_date = data.index[-1]
+        dates = [last_date + timedelta(days=i+1) for i in range(periods)]
+        
+        # Calculate confidence (based on model performance)
+        y_pred_test = model.predict(X_test_scaled)
+        mse = mean_squared_error(y_test, y_pred_test)
+        confidence = max(0, min(100, 100 - (mse / y_test.mean() * 100)))
+        
+        return {
+            'predictions': predictions,
+            'dates': dates,
+            'current_price': data['Close'].iloc[-1],
+            'model_type': 'Random Forest',
+            'confidence': confidence,
+            'data_points': len(df)
+        }, None
+        
+    except Exception as e:
+        return None, f"Error in ML prediction: {str(e)}"
+
+def calculate_rsi(prices, window=14):
+    """Calculate RSI indicator"""
+    delta = prices.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=window).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=window).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 # Main Application Logic
 if analysis_tab == "🏠 Dashboard":
@@ -554,204 +764,482 @@ if analysis_tab == "🏠 Dashboard":
     else:
         st.info("No positions in portfolio. Add positions to see portfolio summary.")
 
+elif analysis_tab == "📊 Stock Analysis":
+    st.header("📊 Comprehensive Stock Analysis")
+    
+    col1, col2 = st.columns([1, 3])
+    with col1:
+        symbol = st.text_input("Stock Symbol", value="AAPL")
+    with col2:
+        period = st.selectbox("Time Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
+    
+    if st.button("Analyze Stock", type="primary"):
+        with st.spinner("Running comprehensive analysis..."):
+            data, error = get_market_data(symbol, period)
+            
+            if error:
+                st.error(f"❌ {error}")
+            else:
+                st.success(f"✅ Analysis complete for {symbol}")
+                
+                # Calculate indicators
+                data_with_indicators = calculate_technical_indicators(data)
+                risk_metrics = calculate_risk_metrics(data)
+                
+                # Display metrics
+                current_price = data['Close'].iloc[-1]
+                previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
+                change = current_price - previous_price
+                change_percent = (change / previous_price) * 100
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    st.metric("Current Price", f"${current_price:.2f}", f"{change:+.2f}")
+                with col2:
+                    st.metric("Change", f"{change_percent:+.2f}%")
+                with col3:
+                    st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
+                with col4:
+                    st.metric("Volatility", risk_metrics['Volatility (Annualized)'])
+                
+                # Price chart with indicators
+                st.subheader("Price Chart with Technical Indicators")
+                
+                fig = go.Figure()
+                
+                # Price line
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data['Close'],
+                    mode='lines',
+                    name='Close Price',
+                    line=dict(color='#1f77b4', width=2)
+                ))
+                
+                # Moving averages
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data_with_indicators['SMA_20'],
+                    mode='lines',
+                    name='SMA 20',
+                    line=dict(color='orange', width=1, dash='dash')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data_with_indicators['SMA_50'],
+                    mode='lines',
+                    name='SMA 50',
+                    line=dict(color='red', width=1, dash='dash')
+                ))
+                
+                # Bollinger Bands
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data_with_indicators['BB_Upper'],
+                    mode='lines',
+                    name='BB Upper',
+                    line=dict(color='gray', width=1, dash='dot')
+                ))
+                
+                fig.add_trace(go.Scatter(
+                    x=data.index,
+                    y=data_with_indicators['BB_Lower'],
+                    mode='lines',
+                    name='BB Lower',
+                    line=dict(color='gray', width=1, dash='dot'),
+                    fill='tonexty'
+                ))
+                
+                fig.update_layout(
+                    title=f"{symbol} Technical Analysis",
+                    xaxis_title="Date",
+                    yaxis_title="Price ($)",
+                    height=500
+                )
+                
+                st.plotly_chart(fig, use_container_width=True)
+                
+                # Risk metrics
+                st.subheader("Risk Assessment")
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    for metric, value in risk_metrics.items():
+                        st.write(f"• **{metric}**: {value}")
+                
+                with col2:
+                    volatility = float(risk_metrics['Volatility (Annualized)'].replace('%', ''))
+                    if volatility < 20:
+                        st.success("✅ Low risk investment")
+                    elif volatility < 40:
+                        st.warning("⚠️ Medium risk investment")
+                    else:
+                        st.error("🚨 High risk investment")
+
+elif analysis_tab == "📈 Market Overview":
+    st.header("📈 Market Overview")
+    col1, col2, col3 = st.columns([2, 1, 1])
+    with col1: 
+        st.info("🌐 **Real-time global market data** (with fallback to demo data)")
+    with col2:
+        if st.button("🔄 Refresh Markets"): 
+            st.rerun()
+    with col3: 
+        st.success("✅ **Markets Open**")
+    
+    st.subheader("🌍 Global Markets")
+    with st.spinner("Loading global market data..."):
+        markets = get_global_markets_overview()
+    
+    if markets:
+        st.success(f"✅ Loaded {len(markets)} market indices")
+        for i in range(0, len(markets), 3):
+            row = markets[i:i+3]
+            cols = st.columns(len(row))
+            for col, item in zip(cols, row):
+                with col:
+                    if 'Treasury' in item['name']: 
+                        price_str = f"{item['price']:.2f}%"
+                    elif item['price'] > 1000: 
+                        price_str = f"${item['price']:,.0f}"
+                    else: 
+                        price_str = f"${item['price']:.2f}"
+                    delta_str = f"{item['change']:+.2f} ({item['change_percent']:+.2f}%)"
+                    if item['change_percent'] > 0: 
+                        st.metric(item['name'], price_str, delta_str, delta_color="normal")
+                    else: 
+                        st.metric(item['name'], price_str, delta_str, delta_color="inverse")
+        
+        st.subheader("📊 Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for m in markets if m['change_percent'] > 0)
+        negative_count = sum(1 for m in markets if m['change_percent'] < 0)
+        avg_change = sum(m['change_percent'] for m in markets) / len(markets)
+        with col1: st.metric("Markets Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Markets Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4:
+            if avg_change > 0: st.metric("Overall Sentiment", "🟢 Bullish", f"+{avg_change:.2f}%")
+            else: st.metric("Overall Sentiment", "🔴 Bearish", f"{avg_change:.2f}%")
+    else:
+        st.error("❌ Unable to load market data")
+        st.info("💡 This might be due to network connectivity or API limits. Demo data should be used as fallback.")
+
 elif analysis_tab == "🌍 Global Markets":
     st.header("🌍 Global Markets Analysis")
     
-    if GLOBAL_MARKETS_AVAILABLE:
-        col1, col2 = st.columns([2, 1])
-        with col1: 
-            st.info("📊 **Comprehensive global market indices and analysis**")
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("📊 **Comprehensive global market indices and analysis**")
+    with col2:
+        if st.button("🔄 Refresh Global Markets"): st.rerun()
+    
+    st.subheader("🌏 Major Global Indices")
+    with st.spinner("Loading global market data..."):
+        markets = get_global_markets_overview()
+    
+    if markets:
+        st.success(f"✅ Loaded {len(markets)} global market indices")
+        
+        # Display in a more organized grid
+        for i in range(0, len(markets), 4):
+            row = markets[i:i+4]
+            cols = st.columns(4)
+            for col, item in zip(cols, row):
+                with col:
+                    st.markdown(f"""
+                    <div style="padding: 10px; border: 1px solid #ddd; border-radius: 5px; margin: 5px 0;">
+                        <h4>{item['name']}</h4>
+                        <p><strong>Price:</strong> ${item['price']:,.2f}</p>
+                        <p style="color: {'green' if item['change_percent'] > 0 else 'red'};">
+                            <strong>{item['change_percent']:+.2f}%</strong>
+                        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+        st.subheader("📈 Market Performance Analysis")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.write("**🔺 Top Performers:**")
+            gainers = sorted(markets, key=lambda x: x['change_percent'], reverse=True)[:5]
+            for i, mover in enumerate(gainers, 1):
+                st.write(f"{i}. {mover['name']}: {mover['change_percent']:+.2f}%")
         with col2:
-            if st.button("🔄 Refresh Global Markets"): 
-                st.rerun()
+            st.write("**🔻 Underperformers:**")
+            losers = sorted(markets, key=lambda x: x['change_percent'])[:5]
+            for i, mover in enumerate(losers, 1):
+                st.write(f"{i}. {mover['name']}: {mover['change_percent']:+.2f}%")
         
-        # Get global markets data
-        with st.spinner("Loading global market data..."):
-            markets_data = global_markets_service.get_global_markets_overview()
-        
-        if markets_data['status'] == 'success':
-            st.success("✅ Global markets data loaded successfully")
-            
-            # Display markets by region
-            for region, markets in markets_data['markets'].items():
-                st.subheader(f"🌏 {region} Markets")
-                
-                if markets:
-                    # Display in grid
-                    for i in range(0, len(markets), 4):
-                        row = markets[i:i+4]
-                        cols = st.columns(4)
-                        for col, market in zip(cols, row):
-                            with col:
-                                change_color = "🟢" if market['change_pct'] >= 0 else "🔴"
-                                st.metric(
-                                    market['name'],
-                                    f"${market['price']:,.2f}",
-                                    f"{change_color} {market['change_pct']:+.2f}%"
-                                )
-                else:
-                    st.warning(f"No data available for {region} markets")
-            
-            # Market sentiment
-            st.subheader("📊 Global Market Sentiment")
-            all_changes = []
-            for region_markets in markets_data['markets'].values():
-                all_changes.extend([market['change_pct'] for market in region_markets])
-            
-            if all_changes:
-                avg_change = np.mean(all_changes)
-                positive_count = sum(1 for change in all_changes if change > 0)
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Average Change", f"{avg_change:.2f}%")
-                with col2:
-                    st.metric("Positive Markets", f"{positive_count}/{len(all_changes)}")
-                with col3:
-                    if avg_change > 0.5:
-                        st.metric("Overall Sentiment", "🟢 Bullish", f"{avg_change:.2f}%")
-                    elif avg_change < -0.5:
-                        st.metric("Overall Sentiment", "🔴 Bearish", f"{avg_change:.2f}%")
-                    else:
-                        st.metric("Overall Sentiment", "🟡 Neutral", f"{avg_change:.2f}%")
-        else:
-            st.error(f"❌ Error loading global markets: {markets_data.get('error', 'Unknown error')}")
+        # Market Summary
+        st.subheader("📊 Global Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for m in markets if m['change_percent'] > 0)
+        negative_count = sum(1 for m in markets if m['change_percent'] < 0)
+        avg_change = sum(m['change_percent'] for m in markets) / len(markets)
+        with col1: st.metric("Markets Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Markets Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4:
+            if avg_change > 0: st.metric("Overall Sentiment", "🟢 Bullish", f"+{avg_change:.2f}%")
+            else: st.metric("Overall Sentiment", "🔴 Bearish", f"{avg_change:.2f}%")
     else:
-        st.error("❌ Global Markets service not available")
-        st.info("💡 Please ensure global_markets_service.py is available")
+        st.error("❌ Unable to load global market data")
+        st.info("💡 This might be due to network connectivity or API limits. Demo data should be used as fallback.")
 
 elif analysis_tab == "💱 Forex Analysis":
     st.header("💱 Forex Analysis")
     
-    if GLOBAL_MARKETS_AVAILABLE:
-        col1, col2 = st.columns([2, 1])
-        with col1: 
-            st.info("💱 **Foreign exchange rates and currency analysis**")
-        with col2:
-            if st.button("🔄 Refresh Forex Data"): 
-                st.rerun()
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("💱 **Major currency pairs and forex analysis**")
+    with col2:
+        if st.button("🔄 Refresh Forex"): st.rerun()
+    
+    st.subheader("🌍 Major Currency Pairs")
+    with st.spinner("Loading forex data..."):
+        forex_data = get_forex_data()
+    
+    if forex_data:
+        st.success(f"✅ Loaded {len(forex_data)} currency pairs")
         
-        # Get forex data
-        with st.spinner("Loading forex data..."):
-            forex_data = global_markets_service.get_forex_rates()
+        # Display forex pairs in organized layout
+        for i in range(0, len(forex_data), 3):
+            row = forex_data[i:i+3]
+            cols = st.columns(3)
+            for col, pair in zip(cols, row):
+                with col:
+                    st.markdown(f"""
+                    <div style="padding: 15px; border: 1px solid #ddd; border-radius: 8px; margin: 5px 0; background: {'#e8f5e8' if pair['change_percent'] > 0 else '#ffe8e8'};">
+                        <h4>{pair['name']}</h4>
+                        <p><strong>Rate:</strong> {pair['price']:.4f}</p>
+                        <p style="color: {'green' if pair['change_percent'] > 0 else 'red'}; font-weight: bold;">
+                            {pair['change']:+.4f} ({pair['change_percent']:+.2f}%)
+                        </p>
+    </div>
+    """, unsafe_allow_html=True)
+    
+        st.subheader("📊 Forex Market Summary")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for p in forex_data if p['change_percent'] > 0)
+        negative_count = sum(1 for p in forex_data if p['change_percent'] < 0)
+        avg_change = sum(p['change_percent'] for p in forex_data) / len(forex_data)
+        volatility = np.std([p['change_percent'] for p in forex_data])
         
-        if forex_data['status'] == 'success':
-            st.success("✅ Forex data loaded successfully")
-            
-            # Display major currency pairs
-            st.subheader("💱 Major Currency Pairs")
-            
-            if forex_data['rates']:
-                for i in range(0, len(forex_data['rates']), 4):
-                    row = forex_data['rates'][i:i+4]
-                    cols = st.columns(4)
-                    for col, rate in zip(cols, row):
-                        with col:
-                            change_color = "🟢" if rate['change_pct'] >= 0 else "🔴"
-                            st.metric(
-                                f"{rate['from_currency']}/{rate['to_currency']}",
-                                f"{rate['rate']:.4f}",
-                                f"{change_color} {rate['change_pct']:+.2f}%"
-                            )
-            
-            # Currency converter
-            st.subheader("🔄 Currency Converter")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                amount = st.number_input("Amount", min_value=0.01, value=100.0, step=0.01)
-            with col2:
-                from_currency = st.selectbox("From", ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"])
-            with col3:
-                to_currency = st.selectbox("To", ["USD", "EUR", "GBP", "JPY", "CHF", "AUD", "CAD"])
-            
-            if st.button("🔄 Convert", type="primary"):
-                with st.spinner("Converting currency..."):
-                    conversion = global_markets_service.convert_currency(amount, from_currency, to_currency)
-                
-                if conversion['status'] == 'success':
-                    st.success(f"💱 {amount} {from_currency} = {conversion['converted_amount']} {to_currency}")
-                    if 'rate' in conversion:
-                        st.info(f"Exchange Rate: 1 {from_currency} = {conversion['rate']} {to_currency}")
-                else:
-                    st.error(f"❌ Conversion failed: {conversion.get('error', 'Unknown error')}")
-        else:
-            st.error(f"❌ Error loading forex data: {forex_data.get('error', 'Unknown error')}")
-    else:
-        st.error("❌ Global Markets service not available")
+        with col1: st.metric("Pairs Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Pairs Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4: st.metric("Volatility", f"{volatility:.2f}%")
 
 elif analysis_tab == "₿ Crypto Markets":
     st.header("₿ Cryptocurrency Markets")
     
-    if GLOBAL_MARKETS_AVAILABLE:
-        col1, col2 = st.columns([2, 1])
-        with col1: 
-            st.info("₿ **Cryptocurrency prices and market analysis**")
+    col1, col2 = st.columns([2, 1])
+    with col1: st.info("₿ **Major cryptocurrencies and market analysis**")
+    with col2:
+        if st.button("🔄 Refresh Crypto"): st.rerun()
+    
+    st.subheader("🚀 Top Cryptocurrencies")
+    with st.spinner("Loading cryptocurrency data..."):
+        crypto_data = get_crypto_data()
+    
+    if crypto_data:
+        st.success(f"✅ Loaded {len(crypto_data)} cryptocurrencies")
+        
+        # Display crypto in organized layout
+        for i in range(0, len(crypto_data), 2):
+            row = crypto_data[i:i+2]
+            cols = st.columns(2)
+            for col, crypto in zip(cols, row):
+                with col:
+                    price_str = f"${crypto['price']:,.2f}" if crypto['price'] > 1 else f"${crypto['price']:.4f}"
+                    st.markdown(f"""
+                    <div style="padding: 20px; border: 1px solid #ddd; border-radius: 10px; margin: 10px 0; background: {'#e8f5e8' if crypto['change_percent'] > 0 else '#ffe8e8'};">
+                        <h3>₿ {crypto['name']}</h3>
+                        <p><strong>Price:</strong> {price_str}</p>
+                        <p style="color: {'green' if crypto['change_percent'] > 0 else 'red'}; font-weight: bold; font-size: 18px;">
+                            {crypto['change']:+.2f} ({crypto['change_percent']:+.2f}%)
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
+        
+        st.subheader("📊 Crypto Market Overview")
+        col1, col2, col3, col4 = st.columns(4)
+        positive_count = sum(1 for c in crypto_data if c['change_percent'] > 0)
+        negative_count = sum(1 for c in crypto_data if c['change_percent'] < 0)
+        avg_change = sum(c['change_percent'] for c in crypto_data) / len(crypto_data)
+        volatility = np.std([c['change_percent'] for c in crypto_data])
+        
+        with col1: st.metric("Crypto Up", f"{positive_count}", f"+{positive_count}")
+        with col2: st.metric("Crypto Down", f"{negative_count}", f"-{negative_count}")
+        with col3: st.metric("Avg Change", f"{avg_change:+.2f}%")
+        with col4: st.metric("Volatility", f"{volatility:.2f}%")
+        
+        st.subheader("🏆 Top Performers")
+        col1, col2 = st.columns(2)
+    with col1:
+            st.write("**🚀 Biggest Gainers:**")
+            gainers = sorted(crypto_data, key=lambda x: x['change_percent'], reverse=True)[:5]
+            for i, crypto in enumerate(gainers, 1):
+                st.write(f"{i}. {crypto['name']}: {crypto['change_percent']:+.2f}%")
+    with col2:
+            st.write("**📉 Biggest Losers:**")
+            losers = sorted(crypto_data, key=lambda x: x['change_percent'])[:5]
+            for i, crypto in enumerate(losers, 1):
+                st.write(f"{i}. {crypto['name']}: {crypto['change_percent']:+.2f}%")
+
+elif analysis_tab == "💼 Portfolio Management":
+    st.header("💼 Portfolio Management")
+    
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("Add Position")
+        symbol = st.text_input("Stock Symbol", value="AAPL")
+        shares = st.number_input("Number of Shares", min_value=1, value=10)
+        price = st.number_input("Purchase Price", min_value=0.01, value=150.00, step=0.01)
+        
+        if st.button("Add to Portfolio"):
+            current_data = get_market_data(symbol, "1d")
+            if current_data is not None:
+                current_price = current_data['Close'].iloc[-1]
+                position = {
+                    'symbol': symbol,
+                    'shares': shares,
+                    'purchase_price': price,
+                    'current_price': current_price,
+                    'value': shares * current_price,
+                    'cost_basis': shares * price,
+                    'pnl': (current_price - price) * shares,
+                    'pnl_percent': ((current_price - price) / price) * 100
+                }
+                st.session_state.portfolio.append(position)
+                st.success(f"Added {shares} shares of {symbol} to portfolio")
+            else:
+                st.error(f"Could not fetch current price for {symbol}")
+    
+    with col2:
+        st.subheader("Portfolio Summary")
+        if st.session_state.portfolio:
+            total_value = sum(pos['value'] for pos in st.session_state.portfolio)
+            total_cost = sum(pos['cost_basis'] for pos in st.session_state.portfolio)
+            total_pnl = total_value - total_cost
+            total_pnl_percent = (total_pnl / total_cost) * 100 if total_cost > 0 else 0
+            
+            st.metric("Total Value", f"${total_value:,.2f}")
+            st.metric("Total P&L", f"${total_pnl:,.2f}", f"{total_pnl_percent:+.2f}%")
+            st.metric("Positions", len(st.session_state.portfolio))
+        else:
+            st.info("No positions in portfolio")
+    
+    # Portfolio table
+    if st.session_state.portfolio:
+        st.subheader("Portfolio Positions")
+        portfolio_df = pd.DataFrame(st.session_state.portfolio)
+        
+        # Format the dataframe for display
+        display_df = portfolio_df.copy()
+        display_df['purchase_price'] = display_df['purchase_price'].apply(lambda x: f"${x:.2f}")
+        display_df['current_price'] = display_df['current_price'].apply(lambda x: f"${x:.2f}")
+        display_df['value'] = display_df['value'].apply(lambda x: f"${x:,.2f}")
+        display_df['cost_basis'] = display_df['cost_basis'].apply(lambda x: f"${x:,.2f}")
+        display_df['pnl'] = display_df['pnl'].apply(lambda x: f"${x:,.2f}")
+        display_df['pnl_percent'] = display_df['pnl_percent'].apply(lambda x: f"{x:+.2f}%")
+        
+        st.dataframe(display_df, use_container_width=True)
+        
+        if st.button("Clear Portfolio", type="secondary"):
+            st.session_state.portfolio = []
+            st.rerun()
+
+elif analysis_tab == "🔴 Real-Time Data":
+    st.header("🔴 Real-Time Data & Live Updates")
+    
+    if not REALTIME_AVAILABLE:
+        st.error("❌ Real-time features are not available. Some dependencies may be missing.")
+        st.info("💡 The app will work with basic features. Real-time features require additional setup.")
+        
+        # Fallback to basic market overview
+        st.subheader("📈 Basic Market Overview")
+        market_data = get_market_overview()
+        
+        if market_data:
+            col1, col2, col3, col4 = st.columns(4)
+            
+            indices = [
+                ('^GSPC', 'S&P 500', col1),
+                ('^IXIC', 'NASDAQ', col2),
+                ('^DJI', 'DOW', col3),
+                ('^VIX', 'VIX', col4)
+            ]
+            
+            for symbol, name, col in indices:
+                with col:
+                    if symbol in market_data:
+                        data = market_data[symbol]
+                        change_color = "🟢" if data['change'] >= 0 else "🔴"
+                        st.metric(
+                            name,
+                            f"${data['price']:.2f}",
+                            f"{change_color} {data['change_percent']:+.2f}%"
+                        )
+        else:
+            st.warning("Could not fetch market data")
+    else:
+        # Real-time mode toggle
+        col1, col2, col3 = st.columns([2, 1, 1])
+        with col1:
+            realtime_mode = st.checkbox("🔴 Enable Real-Time Mode", value=False, help="Enable live data streaming and auto-refresh")
         with col2:
-            if st.button("🔄 Refresh Crypto Data"): 
+            if st.button("🔄 Refresh All"):
+                cache.clear()
+                st.rerun()
+        with col3:
+            if st.button("⏸️ Stop Real-Time"):
+                stop_real_time_mode()
                 st.rerun()
         
-        # Get crypto data
-        with st.spinner("Loading cryptocurrency data..."):
-            crypto_data = global_markets_service.get_cryptocurrency_data()
-        
-        if crypto_data['status'] == 'success':
-            st.success("✅ Cryptocurrency data loaded successfully")
-            
-            # Display top cryptocurrencies
-            st.subheader("₿ Top Cryptocurrencies")
-            
-            if crypto_data['cryptocurrencies']:
-                for i in range(0, len(crypto_data['cryptocurrencies']), 3):
-                    row = crypto_data['cryptocurrencies'][i:i+3]
-                    cols = st.columns(3)
-                    for col, crypto in zip(cols, row):
-                        with col:
-                            change_color = "🟢" if crypto['change_pct'] >= 0 else "🔴"
-                            st.metric(
-                                f"{crypto['name']} (#{crypto['rank']})",
-                                f"${crypto['price']:,.2f}",
-                                f"{change_color} {crypto['change_pct']:+.2f}%"
-                            )
-                            
-                            # Additional metrics
-                            if crypto['market_cap'] > 0:
-                                st.caption(f"Market Cap: ${crypto['market_cap']:,.0f}")
-                            if crypto['volume_24h'] > 0:
-                                st.caption(f"24h Volume: ${crypto['volume_24h']:,.0f}")
-            
-            # Crypto market overview
-            st.subheader("📊 Crypto Market Overview")
-            if crypto_data['cryptocurrencies']:
-                total_market_cap = sum(crypto['market_cap'] for crypto in crypto_data['cryptocurrencies'] if crypto['market_cap'] > 0)
-                total_volume = sum(crypto['volume_24h'] for crypto in crypto_data['cryptocurrencies'] if crypto['volume_24h'] > 0)
-                avg_change = np.mean([crypto['change_pct'] for crypto in crypto_data['cryptocurrencies']])
-                
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Total Market Cap", f"${total_market_cap:,.0f}")
-                with col2:
-                    st.metric("Total 24h Volume", f"${total_volume:,.0f}")
-                with col3:
-                    st.metric("Average Change", f"{avg_change:+.2f}%")
+        if realtime_mode:
+            st.success("🔴 Real-time mode active! Data will update automatically.")
         else:
-            st.error(f"❌ Error loading crypto data: {crypto_data.get('error', 'Unknown error')}")
-    else:
-        st.error("❌ Global Markets service not available")
+            st.info("📊 Cached mode active. Enable real-time mode for live updates.")
+        
+        # Tabs for different real-time features
+        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+            "📈 Live Market", 
+            "📊 Stock Tracker", 
+            "💼 Live Portfolio", 
+            "🔔 Price Alerts", 
+            "🔧 Data Sources"
+        ])
+        
+        with tab1:
+            display_realtime_market_overview()
+        
+        with tab2:
+            # Initialize tracked symbols in session state
+            if 'tracked_symbols' not in st.session_state:
+                st.session_state.tracked_symbols = ['AAPL', 'MSFT', 'GOOGL']
+            
+            display_live_stock_tracker(st.session_state.tracked_symbols)
+        
+        with tab3:
+            display_portfolio_realtime(st.session_state.portfolio)
+        
+        with tab4:
+            display_price_alerts()
+        
+        with tab5:
+            display_data_source_status()
 
 elif analysis_tab == "🤖 Enhanced ML":
     st.header("🤖 Enhanced Machine Learning Analysis")
     
     # Show available libraries status
     col1, col2, col3, col4 = st.columns(4)
-    with col1: 
-        st.metric("TextBlob", "✅ Available" if TEXTBLOB_AVAILABLE else "❌ Missing")
-    with col2: 
-        st.metric("VADER", "✅ Available" if VADER_AVAILABLE else "❌ Missing")
-    with col3: 
-        st.metric("NLTK", "✅ Available" if NLTK_AVAILABLE else "❌ Missing")
-    with col4: 
-        st.metric("Transformers", "✅ Available" if TRANSFORMERS_AVAILABLE else "❌ Missing")
+    with col1: st.metric("TextBlob", "✅ Available" if TEXTBLOB_AVAILABLE else "❌ Missing")
+    with col2: st.metric("VADER", "✅ Available" if VADER_AVAILABLE else "❌ Missing")
+    with col3: st.metric("NLTK", "✅ Available" if NLTK_AVAILABLE else "❌ Missing")
+    with col4: st.metric("Transformers", "✅ Available" if TRANSFORMERS_AVAILABLE else "❌ Missing")
     
     if not ENHANCED_ML_AVAILABLE:
         st.error("❌ No enhanced ML libraries available. Please install textblob, vaderSentiment, nltk, or transformers.")
@@ -795,561 +1283,135 @@ elif analysis_tab == "🤖 Enhanced ML":
                 else:
                     st.error(f"❌ No data available for {symbol}")
     else:
-        st.success("✅ Enhanced ML features are available!")
-        st.info("💡 All ML libraries are working correctly - no Redis required!")
-
-elif analysis_tab == "📊 Stock Analysis":
-    st.header("📊 Stock Analysis")
-    
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        symbol = st.text_input("Stock Symbol", value="AAPL")
-        period = st.selectbox("Time Period", ["1mo", "3mo", "6mo", "1y", "2y"], index=1)
-    
-    if st.button("🚀 Analyze Stock", type="primary"):
-        with st.spinner(f"Analyzing {symbol}..."):
-            data = get_market_data(symbol, period)
-            
-            if data is not None and not data.empty:
-                st.success(f"✅ Analysis complete for {symbol}")
-                
-                # Basic metrics
-                current_price = data['Close'].iloc[-1]
-                previous_price = data['Close'].iloc[-2] if len(data) > 1 else current_price
-                change = current_price - previous_price
-                change_percent = (change / previous_price) * 100
-                
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.metric("Current Price", f"${current_price:.2f}")
-                with col2:
-                    st.metric("Change", f"{change:+.2f}")
-                with col3:
-                    st.metric("Change %", f"{change_percent:+.2f}%")
-                with col4:
-                    # Calculate RSI
-                    data_with_indicators = calculate_technical_indicators(data)
-                    rsi = data_with_indicators['RSI'].iloc[-1]
-                    st.metric("RSI", f"{rsi:.1f}")
-                
-                # Price chart
-                st.subheader("📈 Price Chart")
-                go = get_plotly_go()
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=data.index,
-                    y=data['Close'],
-                    mode='lines',
-                    name='Close Price',
-                    line=dict(color='#667eea', width=2)
-                ))
-                
-                fig.update_layout(
-                    title=f"{symbol} Price Chart",
-                    xaxis_title="Date",
-                    yaxis_title="Price ($)",
-                    height=400,
-                    showlegend=False
-                )
-                
-                st.plotly_chart(fig, use_container_width=True)
-            else:
-                st.error(f"❌ No data available for {symbol}")
-
-elif analysis_tab == "💼 Portfolio Management":
-    st.header("💼 Portfolio Management")
-    
-    st.subheader("Add Position")
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        symbol = st.text_input("Symbol", placeholder="AAPL", key="portfolio_symbol")
-    with col2:
-        shares = st.number_input("Shares", min_value=1, value=100, key="portfolio_shares")
-    with col3:
-        cost_basis = st.number_input("Cost per Share", min_value=0.01, value=150.0, key="portfolio_cost")
-    
-    if st.button("Add Position") and symbol:
-        # Get current price
-        data = get_market_data(symbol, "1d")
-        if data is not None and not data.empty:
-            current_price = data['Close'].iloc[-1]
-            position_value = shares * current_price
-            total_cost = shares * cost_basis
-            pnl = position_value - total_cost
-            pnl_percent = (pnl / total_cost) * 100
-            
-            position = {
-                'symbol': symbol,
-                'shares': shares,
-                'cost_basis': cost_basis,
-                'current_price': current_price,
-                'value': position_value,
-                'pnl': pnl,
-                'pnl_percent': pnl_percent
-            }
-            
-            st.session_state.portfolio.append(position)
-            st.success(f"Added {shares} shares of {symbol}")
-            st.rerun()
-    
-    # Display portfolio
-    if st.session_state.portfolio:
-        st.subheader("Current Portfolio")
-        
-        total_value = sum(pos['value'] for pos in st.session_state.portfolio)
-        total_cost = sum(pos['cost_basis'] * pos['shares'] for pos in st.session_state.portfolio)
-        total_pnl = total_value - total_cost
-        total_pnl_percent = (total_pnl / total_cost) * 100 if total_cost > 0 else 0
-        
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2 = st.columns([1, 3])
         with col1:
-            st.metric("Total Value", f"${total_value:,.2f}")
+            symbol = st.text_input("Stock Symbol", value="AAPL")
         with col2:
-            st.metric("Total P&L", f"${total_pnl:,.2f}")
-        with col3:
-            st.metric("P&L %", f"{total_pnl_percent:+.2f}%")
-        with col4:
-            st.metric("Positions", len(st.session_state.portfolio))
+            period = st.selectbox("Time Period", ["6mo", "1y", "2y", "5y"], index=1)
         
-        # Portfolio table
-        portfolio_df = pd.DataFrame(st.session_state.portfolio)
-        st.dataframe(portfolio_df, use_container_width=True)
-
-elif analysis_tab == "📈 Market Overview":
-    st.header("📈 Market Overview")
-    
-    # Market overview
-    st.subheader("📈 Market Overview")
-    market_data = get_market_overview()
-    
-    if market_data:
-        col1, col2, col3, col4 = st.columns(4)
-        
-        indices = [
-            ('^GSPC', 'S&P 500', col1),
-            ('^IXIC', 'NASDAQ', col2),
-            ('^DJI', 'DOW', col3),
-            ('^VIX', 'VIX', col4)
-        ]
-        
-        for symbol, name, col in indices:
-            with col:
-                if symbol in market_data:
-                    data = market_data[symbol]
-                    change_color = "🟢" if data['change'] >= 0 else "🔴"
-                    st.metric(
-                        name,
-                        f"${data['price']:.2f}",
-                        f"{change_color} {data['change_percent']:+.2f}%"
-                    )
-
-elif analysis_tab == "🔴 Real-Time Data":
-    st.header("🔴 Real-Time Data")
-    
-    if REALTIME_AVAILABLE:
-        st.success("✅ Real-time features are available!")
-        st.info("💡 Real-time data services are working correctly")
-        
-        # Real-time market overview
-        st.subheader("📊 Real-Time Market Overview")
-        if st.button("🔄 Refresh Real-Time Data"):
-            st.rerun()
-        
-        # Display real-time data status
-        st.metric("Real-Time Status", "🟢 Active")
-        st.metric("Data Sources", "✅ Connected")
-        st.metric("Last Update", datetime.now().strftime("%H:%M:%S"))
-    else:
-        st.warning("⚠️ Real-time features not available")
-        st.info("💡 Real-time services require additional setup")
-
-elif analysis_tab == "🏭 Industry Analysis":
-    st.header("🏭 Industry Analysis")
-    
-    st.subheader("📊 Sector Performance")
-    
-    # Define major sectors
-    sectors = [
-        {'symbol': 'XLK', 'name': 'Technology'},
-        {'symbol': 'XLF', 'name': 'Financials'},
-        {'symbol': 'XLE', 'name': 'Energy'},
-        {'symbol': 'XLV', 'name': 'Healthcare'},
-        {'symbol': 'XLI', 'name': 'Industrials'},
-        {'symbol': 'XLY', 'name': 'Consumer Discretionary'},
-        {'symbol': 'XLP', 'name': 'Consumer Staples'},
-        {'symbol': 'XLU', 'name': 'Utilities'},
-        {'symbol': 'XLB', 'name': 'Materials'},
-        {'symbol': 'XLRE', 'name': 'Real Estate'}
-    ]
-    
-    sector_data = []
-    for sector in sectors:
-        try:
-            yf = get_yfinance()
-            ticker = yf.Ticker(sector['symbol'])
-            hist = ticker.history(period="2d", timeout=5)
-            
-            if not hist.empty and len(hist) >= 2:
-                current_price = hist['Close'].iloc[-1]
-                previous_price = hist['Close'].iloc[-2]
-                change_percent = ((current_price - previous_price) / previous_price) * 100
-                
-                sector_data.append({
-                    'Sector': sector['name'],
-                    'Symbol': sector['symbol'],
-                    'Price': current_price,
-                    'Change %': change_percent
-                })
-        except Exception as e:
-            # Demo data fallback
-            np.random.seed(hash(sector['symbol']) % 2**32)
-            base_price = 100 + (hash(sector['symbol']) % 50)
-            change_percent = np.random.normal(0, 2)
-            
-            sector_data.append({
-                'Sector': sector['name'],
-                'Symbol': sector['symbol'],
-                'Price': base_price,
-                'Change %': change_percent
-            })
-    
-    if sector_data:
-        sector_df = pd.DataFrame(sector_data)
-        st.dataframe(sector_df, use_container_width=True)
-        
-        # Sector performance chart
-        st.subheader("📈 Sector Performance Chart")
-        px = get_plotly_px()
-        fig = px.bar(sector_df, x='Sector', y='Change %', 
-                    title='Sector Performance (%)',
-                    color='Change %',
-                    color_continuous_scale=['red', 'white', 'green'])
-        st.plotly_chart(fig, use_container_width=True)
-
-elif analysis_tab == "⚠️ Risk Assessment":
-    st.header("⚠️ Risk Assessment")
-    
-    st.subheader("📊 Portfolio Risk Analysis")
-    
-    if st.session_state.portfolio:
-        # Calculate portfolio risk metrics
-        portfolio_returns = []
-        for position in st.session_state.portfolio:
-            # Simulate returns for demonstration
-            np.random.seed(hash(position['symbol']) % 2**32)
-            returns = np.random.normal(0.001, 0.02, 252)  # Daily returns
-            portfolio_returns.extend(returns)
-        
-        if portfolio_returns:
-            returns_array = np.array(portfolio_returns)
-            
-            # Calculate risk metrics
-            volatility = np.std(returns_array) * np.sqrt(252) * 100
-            sharpe_ratio = np.mean(returns_array) / np.std(returns_array) * np.sqrt(252)
-            var_95 = np.percentile(returns_array, 5) * 100
-            
-            col1, col2, col3, col4 = st.columns(4)
-            
-            with col1:
-                st.metric("Portfolio Volatility", f"{volatility:.2f}%")
-            with col2:
-                st.metric("Sharpe Ratio", f"{sharpe_ratio:.2f}")
-            with col3:
-                st.metric("VaR (95%)", f"{var_95:.2f}%")
-            with col4:
-                risk_level = "High" if volatility > 20 else "Medium" if volatility > 10 else "Low"
-                st.metric("Risk Level", risk_level)
-            
-            # Risk assessment
-            st.subheader("🎯 Risk Assessment")
-            if volatility < 10:
-                st.success("✅ Low Risk Portfolio - Conservative allocation")
-            elif volatility < 20:
-                st.warning("⚠️ Medium Risk Portfolio - Balanced allocation")
-            else:
-                st.error("🔴 High Risk Portfolio - Aggressive allocation")
-    else:
-        st.info("💼 Add positions to your portfolio to see risk analysis")
-
-elif analysis_tab == "📊 Technical Analysis":
-    st.header("📊 Technical Analysis")
-    
-    col1, col2 = st.columns([1, 3])
-    with col1:
-        symbol = st.text_input("Stock Symbol", value="AAPL", key="tech_symbol")
-        period = st.selectbox("Time Period", ["1mo", "3mo", "6mo", "1y"], index=1, key="tech_period")
-    
-    if st.button("🚀 Run Technical Analysis", type="primary"):
-        with st.spinner(f"Running technical analysis for {symbol}..."):
-            try:
-                # Call the API for technical analysis
-                import requests
-                api_url = f"{API_BASE_URL}/api/technical/{symbol}"
-                response = requests.get(api_url, timeout=10)
-                
-                if response.status_code == 200:
-                    tech_data = response.json()
-                    indicators = tech_data.get('indicators', {})
-                    signals = indicators.get('signals', {})
-                    
-                    st.success(f"✅ Technical analysis complete for {symbol}")
-                    
-                    # Display technical indicators
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("Current Price", f"${indicators.get('current_price', 0):.2f}")
-                    with col2:
-                        st.metric("SMA 20", f"${indicators.get('sma_20', 0):.2f}")
-                    with col3:
-                        st.metric("SMA 50", f"${indicators.get('sma_50', 0):.2f}")
-                    with col4:
-                        st.metric("RSI", f"{indicators.get('rsi', 0):.1f}")
-                    
-                    # Additional indicators
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        st.metric("MACD", f"{indicators.get('macd', 0):.4f}")
-                    with col2:
-                        st.metric("ATR", f"{indicators.get('atr', 0):.2f}")
-                    with col3:
-                        st.metric("Volume SMA", f"{indicators.get('volume_sma', 0):,.0f}")
-                    with col4:
-                        st.metric("BB Position", signals.get('bb_position', 'N/A'))
-                    
-                    # Trading signals
-                    st.subheader("📊 Trading Signals")
-                    col1, col2, col3, col4 = st.columns(4)
-                    
-                    with col1:
-                        trend_color = "green" if signals.get('trend') == 'Bullish' else "red" if signals.get('trend') == 'Bearish' else "gray"
-                        st.markdown(f"**Trend:** :{trend_color}[{signals.get('trend', 'Neutral')}]")
-                    
-                    with col2:
-                        rsi_signal = signals.get('rsi_signal', 'Neutral')
-                        rsi_color = "orange" if rsi_signal == 'Overbought' else "blue" if rsi_signal == 'Oversold' else "gray"
-                        st.markdown(f"**RSI:** :{rsi_color}[{rsi_signal}]")
-                    
-                    with col3:
-                        macd_color = "green" if signals.get('macd_signal') == 'Bullish' else "red" if signals.get('macd_signal') == 'Bearish' else "gray"
-                        st.markdown(f"**MACD:** :{macd_color}[{signals.get('macd_signal', 'Neutral')}]")
-                    
-                    with col4:
-                        # Generate combined signal
-                        trend = signals.get('trend', '')
-                        rsi_signal = signals.get('rsi_signal', '')
-                        macd_signal = signals.get('macd_signal', '')
-                        
-                        combined_signal = "Hold"
-                        signal_color = "gray"
-                        
-                        if trend == 'Bullish' and rsi_signal != 'Overbought' and macd_signal == 'Bullish':
-                            combined_signal = "Strong Buy"
-                            signal_color = "green"
-                        elif trend == 'Bullish' and rsi_signal != 'Overbought':
-                            combined_signal = "Buy"
-                            signal_color = "green"
-                        elif trend == 'Bearish' and rsi_signal == 'Oversold' and macd_signal == 'Bearish':
-                            combined_signal = "Strong Sell"
-                            signal_color = "red"
-                        elif trend == 'Bearish' or rsi_signal == 'Overbought':
-                            combined_signal = "Sell"
-                            signal_color = "red"
-                        elif rsi_signal == 'Oversold':
-                            combined_signal = "Buy"
-                            signal_color = "green"
-                        
-                        st.markdown(f"**Signal:** :{signal_color}[{combined_signal}]")
-                    
-                    # Bollinger Bands
-                    st.subheader("📊 Bollinger Bands")
-                    col1, col2, col3 = st.columns(3)
-                    
-                    with col1:
-                        st.metric("Upper Band", f"${indicators.get('bb_upper', 0):.2f}")
-                    with col2:
-                        st.metric("Middle Band", f"${indicators.get('bb_middle', 0):.2f}")
-                    with col3:
-                        st.metric("Lower Band", f"${indicators.get('bb_lower', 0):.2f}")
-                    
-                    # Stochastic Oscillator
-                    st.subheader("📊 Stochastic Oscillator")
-                    col1, col2 = st.columns(2)
-                    
-                    with col1:
-                        st.metric("Stochastic %K", f"{indicators.get('stoch_k', 0):.2f}")
-                    with col2:
-                        st.metric("Stochastic %D", f"{indicators.get('stoch_d', 0):.2f}")
-                    
-                    # Get market data for chart
-                    data = get_market_data(symbol, period)
-                    if data is not None and not data.empty:
-                        # Technical analysis chart
-                        st.subheader("📈 Technical Analysis Chart")
-                        go = get_plotly_go()
-                        fig = go.Figure()
-                        
-                        # Price line
-                        fig.add_trace(go.Scatter(
-                            x=data.index,
-                            y=data['Close'],
-                            mode='lines',
-                            name='Close Price',
-                            line=dict(color='#667eea', width=2)
-                        ))
-                        
-                        # Bollinger Bands
-                        fig.add_trace(go.Scatter(
-                            x=data.index,
-                            y=[indicators.get('bb_upper', 0)] * len(data),
-                            mode='lines',
-                            name='BB Upper',
-                            line=dict(color='red', width=1, dash='dash')
-                        ))
-                        
-                        fig.add_trace(go.Scatter(
-                            x=data.index,
-                            y=[indicators.get('bb_lower', 0)] * len(data),
-                            mode='lines',
-                            name='BB Lower',
-                            line=dict(color='red', width=1, dash='dash')
-                        ))
-                        
-                        fig.update_layout(
-                            title=f"{symbol} Technical Analysis with Bollinger Bands",
-                            xaxis_title="Date",
-                            yaxis_title="Price ($)",
-                            height=500
-                        )
-                        
-                        st.plotly_chart(fig, use_container_width=True)
-                    
-                else:
-                    st.error(f"❌ API Error: {response.status_code} - {response.text}")
-                    
-            except requests.exceptions.RequestException as e:
-                st.error(f"❌ Connection Error: {str(e)}")
-                st.info(f"Please ensure the API server is running on {API_BASE_URL}")
-            except Exception as e:
-                st.error(f"❌ Error: {str(e)}")
-                # Fallback to local calculation
-                st.info("Falling back to local technical analysis...")
-                data = get_market_data(symbol, period)
+        if st.button("🚀 Run Enhanced ML Analysis", type="primary"):
+            with st.spinner("Running enhanced machine learning analysis..."):
+                min_days = 90 if period in ["1y", "2y", "5y"] else 60
+                data = get_market_data(symbol, period, min_days=min_days)
                 
                 if data is not None and not data.empty:
-                    st.success(f"✅ Local technical analysis complete for {symbol}")
+                    st.success(f"✅ Enhanced ML analysis complete for {symbol}")
                     
-                    # Calculate technical indicators locally
-                    data_with_indicators = calculate_technical_indicators(data)
+                    # Perform enhanced ML analysis
+                    analysis_results = enhanced_ml_analysis(data, symbol)
                     
-                    # Display basic indicators
+                    # Display results
+                    st.subheader("📊 Enhanced ML Analysis Results")
+                    
+                    # Basic Analysis
+                    if analysis_results['basic_analysis']:
+                        st.subheader("📈 Basic Analysis")
+                        basic = analysis_results['basic_analysis']
                     col1, col2, col3, col4 = st.columns(4)
+                    with col1: 
+                        st.metric("Current Price", f"${basic['current_price']:.2f}")
+                    with col2: 
+                        st.metric("Volatility", f"{basic['volatility']:.2f}%")
+                    with col3: 
+                        st.metric("Trend", basic['trend'])
+                    with col4: 
+                        st.metric("Avg Volume", f"{basic['volume_avg']:,.0f}")
                     
-                    with col1:
-                        st.metric("Current Price", f"${data['Close'].iloc[-1]:.2f}")
-                    with col2:
-                        st.metric("SMA 20", f"${data_with_indicators['SMA_20'].iloc[-1]:.2f}")
-                    with col3:
-                        st.metric("SMA 50", f"${data_with_indicators['SMA_50'].iloc[-1]:.2f}")
-                    with col4:
-                        st.metric("RSI", f"{data_with_indicators['RSI'].iloc[-1]:.1f}")
+                    # Sentiment Analysis
+                    if analysis_results['sentiment_analysis']:
+                        st.subheader("😊 Sentiment Analysis")
+                        sentiment = analysis_results['sentiment_analysis']
+                        
+                        if 'textblob' in sentiment and 'error' not in sentiment['textblob']:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("TextBlob Polarity", f"{sentiment['textblob']['polarity']:.3f}")
+                            with col2:
+                                st.metric("TextBlob Subjectivity", f"{sentiment['textblob']['subjectivity']:.3f}")
+                            with col3:
+                                st.metric("TextBlob Label", sentiment['textblob']['label'])
+                        
+                        if 'vader' in sentiment and 'error' not in sentiment['vader']:
+                            col1, col2, col3 = st.columns(3)
+                            with col1:
+                                st.metric("VADER Compound", f"{sentiment['vader']['compound']:.3f}")
+                            with col2:
+                                st.metric("VADER Positive", f"{sentiment['vader']['positive']:.3f}")
+                            with col3:
+                                st.metric("VADER Label", sentiment['vader']['label'])
                     
-                    # Basic chart
-                    st.subheader("📈 Basic Technical Analysis Chart")
-                    go = get_plotly_go()
-                    fig = go.Figure()
+                    # Advanced Metrics
+                    if analysis_results['advanced_metrics']:
+                        st.subheader("📊 Advanced Metrics")
+                        advanced = analysis_results['advanced_metrics']
+                        col1, col2, col3 = st.columns(3)
+                        with col1: st.metric("Sharpe Ratio", f"{advanced['sharpe_ratio']:.3f}")
+                        with col2: st.metric("Max Drawdown", f"{advanced['max_drawdown']:.2f}%")
+                        with col3: st.metric("Annualized Volatility", f"{advanced['volatility_annualized']:.2f}%")
                     
-                    fig.add_trace(go.Scatter(
-                        x=data_with_indicators.index,
-                        y=data_with_indicators['Close'],
-                        mode='lines',
-                        name='Close Price',
-                        line=dict(color='#667eea', width=2)
-                    ))
+                    # Enhanced ML Predictions
+                    st.subheader("🤖 Enhanced ML Predictions")
+                    predictions, error = predict_price_ml(data, symbol, periods=5)
                     
-                    fig.add_trace(go.Scatter(
-                        x=data_with_indicators.index,
-                        y=data_with_indicators['SMA_20'],
-                        mode='lines',
-                        name='SMA 20',
-                        line=dict(color='orange', width=1)
-                    ))
-                    
-                    fig.add_trace(go.Scatter(
-                        x=data_with_indicators.index,
-                        y=data_with_indicators['SMA_50'],
-                        mode='lines',
-                        name='SMA 50',
-                        line=dict(color='red', width=1)
-                    ))
-                    
-                    fig.update_layout(
-                        title=f"{symbol} Basic Technical Analysis",
-                        xaxis_title="Date",
-                        yaxis_title="Price ($)",
-                        height=500
-                    )
-                    
-                    st.plotly_chart(fig, use_container_width=True)
+                    if predictions:
+                        st.markdown(f"""
+                        <div class="prediction-card">
+                            <h4>📈 Enhanced Price Predictions (Next 5 Days)</h4>
+                            <p><strong>Model:</strong> {predictions['model_type']}</p>
+                            <p><strong>Current Price:</strong> ${predictions['current_price']:.2f}</p>
+                            <p><strong>Confidence:</strong> {predictions.get('confidence', 'N/A'):.1f}%</p>
+                            <p><strong>Data Points:</strong> {predictions.get('data_points', 'N/A')} days</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+                        pred_df = pd.DataFrame({
+                            'Date': predictions['dates'],
+                            'Predicted Price': [f"${p:.2f}" for p in predictions['predictions']],
+                            'Change from Current': [f"{((p - predictions['current_price']) / predictions['current_price'] * 100):+.2f}%" 
+                                                  for p in predictions['predictions']]
+                        })
+                        st.dataframe(pred_df, use_container_width=True)
+                    else:
+                        st.error(f"Enhanced prediction failed: {error}")
                 else:
                     st.error(f"❌ No data available for {symbol}")
 
 elif analysis_tab == "📤 Export & Reports":
     st.header("📤 Export & Reports")
     
-    st.subheader("📊 Generate Reports")
+    st.subheader("Export Portfolio Data")
     
     if st.session_state.portfolio:
-        # Portfolio report
-        if st.button("📄 Generate Portfolio Report"):
-            portfolio_df = pd.DataFrame(st.session_state.portfolio)
+        portfolio_df = pd.DataFrame(st.session_state.portfolio)
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Portfolio Data**")
+            st.dataframe(portfolio_df, use_container_width=True)
+        
+        with col2:
+            st.write("**Export Options**")
             
-            # Convert to CSV
+            # CSV export
             csv = portfolio_df.to_csv(index=False)
             st.download_button(
-                label="📥 Download Portfolio CSV",
+                label="Download CSV",
                 data=csv,
-                file_name=f"portfolio_report_{datetime.now().strftime('%Y%m%d')}.csv",
+                file_name=f"portfolio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                 mime="text/csv"
             )
             
-            # Display summary
-            st.subheader("📊 Portfolio Summary")
-            total_value = sum(pos['value'] for pos in st.session_state.portfolio)
-            total_cost = sum(pos['cost_basis'] * pos['shares'] for pos in st.session_state.portfolio)
-            total_pnl = total_value - total_cost
-            
-            st.metric("Total Portfolio Value", f"${total_value:,.2f}")
-            st.metric("Total Cost Basis", f"${total_cost:,.2f}")
-            st.metric("Total P&L", f"${total_pnl:,.2f}")
+            # JSON export
+            json_data = portfolio_df.to_json(orient='records')
+            st.download_button(
+                label="Download JSON",
+                data=json_data,
+                file_name=f"portfolio_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                mime="application/json"
+            )
     else:
-        st.info("💼 Add positions to your portfolio to generate reports")
-
-elif analysis_tab == "⚙️ Settings":
-    st.header("⚙️ Settings")
-    
-    st.subheader("🔧 Application Settings")
-    
-    # Cache settings
-    st.subheader("💾 Cache Settings")
-    if st.button("🗑️ Clear Cache"):
-        cache.clear()
-        st.success("✅ Cache cleared successfully")
-    
-    # Display system info
-    st.subheader("ℹ️ System Information")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.metric("Real-time Features", "✅ Available" if REALTIME_AVAILABLE else "❌ Unavailable")
-        st.metric("Global Markets", "✅ Available" if GLOBAL_MARKETS_AVAILABLE else "❌ Unavailable")
-    
-    with col2:
-        st.metric("Enhanced ML", "✅ Available" if ENHANCED_ML_AVAILABLE else "❌ Unavailable")
-        st.metric("Scikit-learn", "✅ Available" if SKLEARN_AVAILABLE else "❌ Unavailable")
+        st.info("No portfolio data to export")
 
 # Footer
 st.markdown("---")
@@ -1357,6 +1419,6 @@ st.markdown("""
 <div style="text-align: center; color: #666;">
     <p>🎉 <strong>Financial Analyzer Pro - Complete Platform!</strong></p>
     <p>All Features • Real-time Data • Machine Learning • Portfolio Management</p>
-    <p>Fixed Version - No Redis Required - All Features Working!</p>
+    <p>Phase 5 Complete - Professional Financial Analysis Platform</p>
 </div>
 """, unsafe_allow_html=True)

@@ -1,42 +1,52 @@
 services:
-  # Backend API (FastAPI via uvicorn)
   - type: web
-    name: moneta-backend-api
+    name: financial-analyzer-full
     env: python
     plan: free
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
-    startCommand: python -m uvicorn proxy:app --host 0.0.0.0 --port $PORT
+    buildCommand: |
+      pip install --upgrade pip
+      pip install --upgrade setuptools wheel
+      pip install streamlit>=1.28.0,<2.0.0
+      pip install pandas>=2.0.0,<3.0.0
+      pip install plotly>=5.0.0,<6.0.0
+      pip install yfinance>=0.2.0,<1.0.0
+      pip install numpy>=1.24.0,<2.0.0
+      pip install scipy>=1.11.0,<2.0.0
+      pip install scikit-learn>=1.3.0,<2.0.0
+      pip install requests>=2.31.0,<3.0.0
+      pip install python-dotenv>=1.0.0
+      pip install textblob>=0.17.0
+      pip install nltk>=3.8.0
+      pip install vaderSentiment>=3.3.0
+      pip install transformers>=4.21.0
+      pip install torch>=1.12.0
+      pip install redis>=4.6.0
+    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: SECRET_KEY
-        generateValue: true
-      - key: ENABLE_TIINGO
-        value: true
-      - key: ENABLE_ALPHA_VANTAGE
-        value: true
-      - key: TIINGO_API_KEY
-        sync: false
-      - key: ALPHAVANTAGE_API_KEY
-        sync: false
-      - key: NEWSAPI_KEY
-        sync: false
-      - key: FRED_API_KEY
-        sync: false
-
-  # Web Dashboard (Streamlit)
-  - type: web
-    name: moneta-web-dashboard
-    env: python
-    plan: free
-    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
-    startCommand: streamlit run app.py --server.port $PORT --server.address 0.0.0.0 --server.headless true
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
+        value: 3.11.0
       - key: STREAMLIT_SERVER_HEADLESS
         value: true
       - key: STREAMLIT_SERVER_ADDRESS
         value: 0.0.0.0
-      - key: API_BASE_URL
-        value: https://moneta-backend-api.onrender.com
+      - key: STREAMLIT_SERVER_ENABLE_CORS
+        value: false
+      - key: STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION
+        value: false
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

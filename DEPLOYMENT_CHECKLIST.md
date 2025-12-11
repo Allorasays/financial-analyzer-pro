@@ -109,7 +109,3 @@
 **URL**: `https://financial-analyzer-full.onrender.com`
 
 **Cost**: Free (with optional paid upgrades)
-
-
-
-

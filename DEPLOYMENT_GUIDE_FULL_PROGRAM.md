@@ -246,7 +246,3 @@ Your Financial Analyzer Pro is now live with all features working!
 4. Scale up if needed (paid plans)
 
 **Support**: Check Render documentation or contact support if issues persist.
-
-
-
-
