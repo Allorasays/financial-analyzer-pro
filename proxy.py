@@ -2498,17 +2498,9 @@ async def get_market_overview():
                         "is_live": False
                     })
                 else:
-                    # Add placeholder data
-                    indices_data.append({
-                        "symbol": index["symbol"].replace("^", ""),
-                        "name": index["display"],
-                        "value": 0,
-                        "change": 0,
-                        "change_pct": 0,
-                        "volume": 0,
-                        "data_source": "error",
-                        "is_live": False
-                    })
+                    # Skip indices with no real data - don't return placeholder
+                    print(f"Warning: No real data available for {index['symbol']}, skipping")
+                    continue
                 continue
         
         # Trending stocks with better error handling
@@ -3582,15 +3574,25 @@ async def get_comprehensive_analysis(ticker: str, prediction_days: int = 30):
         sentiment_data = get_sentiment_analysis(ticker.upper())
         
         # Fetch economic indicators for enhanced market confidence
-        # Note: economic_indicators_service may not be available, use fallback
+        # Use FRED indicators (real data) instead of placeholder
         try:
-            economic_indicators = economic_indicators_service.get_comprehensive_market_confidence()
-        except (NameError, AttributeError):
-            # Fallback if service not available
+            from fred_indicators import get_fred_indicators
+            fred_data = get_fred_indicators()
+            # Convert FRED data to economic indicators format
             economic_indicators = {
-                "interpretation": "Moderate",
+                "interpretation": "Moderate",  # Can be enhanced with logic based on FRED data
                 "confidence": 0.5,
-                "factors": []
+                "factors": [],
+                "fred_data": fred_data  # Include real FRED data
+            }
+        except Exception as e:
+            # Fallback if FRED not available - return minimal structure but no fake data
+            economic_indicators = {
+                "interpretation": "Unknown",
+                "confidence": None,
+                "factors": [],
+                "data_available": False,
+                "error": str(e)
             }
         
         # Get comprehensive stock and financial data
@@ -3781,22 +3783,96 @@ async def get_ai_market_data(
                 "bb_lower": ta.volatility.bollinger_lband(hist['Close']).fillna(0).tolist()
             }
         
-        # Calculate risk metrics
+        # Calculate risk metrics - ALL REAL DATA, NO PLACEHOLDERS
         risk_metrics = None
         if include_risk:
             returns = hist['Close'].pct_change().dropna()
+            
+            # Calculate real Beta, Alpha, and other metrics from market correlation
+            market_metrics = calculate_market_metrics(ticker, hist)
+            beta = market_metrics.get('beta', None)
+            
+            # Calculate real Alpha (excess return over market)
+            alpha = None
+            if beta is not None and not np.isnan(beta):
+                try:
+                    # Get S&P 500 data for comparison
+                    sp500 = yf.Ticker("^GSPC")
+                    sp500_hist = sp500.history(period=period)
+                    if not sp500_hist.empty:
+                        # Align dates
+                        aligned = pd.concat([hist['Close'], sp500_hist['Close']], axis=1).dropna()
+                        if len(aligned) > 20:
+                            stock_ret = aligned.iloc[:, 0].pct_change().dropna()
+                            market_ret = aligned.iloc[:, 1].pct_change().dropna()
+                            
+                            # Annualized returns
+                            stock_annual_return = stock_ret.mean() * 252
+                            market_annual_return = market_ret.mean() * 252
+                            
+                            # Risk-free rate (approximate with 10-year Treasury, default 0.03 for 3%)
+                            risk_free_rate = 0.03
+                            
+                            # Alpha = Stock Return - (Risk-Free Rate + Beta * (Market Return - Risk-Free Rate))
+                            alpha = stock_annual_return - (risk_free_rate + beta * (market_annual_return - risk_free_rate))
+                except:
+                    pass
+            
+            # Calculate real Information Ratio (excess return / tracking error)
+            information_ratio = None
+            if beta is not None and not np.isnan(beta):
+                try:
+                    sp500 = yf.Ticker("^GSPC")
+                    sp500_hist = sp500.history(period=period)
+                    if not sp500_hist.empty:
+                        aligned = pd.concat([hist['Close'], sp500_hist['Close']], axis=1).dropna()
+                        if len(aligned) > 20:
+                            stock_ret = aligned.iloc[:, 0].pct_change().dropna()
+                            market_ret = aligned.iloc[:, 1].pct_change().dropna()
+                            
+                            # Tracking error (standard deviation of excess returns)
+                            excess_returns = stock_ret - market_ret
+                            tracking_error = excess_returns.std() * np.sqrt(252)
+                            
+                            if tracking_error > 0:
+                                excess_return_annual = (stock_ret.mean() - market_ret.mean()) * 252
+                                information_ratio = excess_return_annual / tracking_error
+                except:
+                    pass
+            
+            # Calculate real Treynor Ratio (excess return / Beta)
+            treynor_ratio = None
+            if beta is not None and not np.isnan(beta) and beta != 0:
+                try:
+                    risk_free_rate = 0.03
+                    stock_annual_return = returns.mean() * 252
+                    treynor_ratio = (stock_annual_return - risk_free_rate) / beta
+                except:
+                    pass
+            
+            # Calculate real Calmar Ratio (annual return / max drawdown)
+            calmar_ratio = None
+            try:
+                max_drawdown = abs(((hist['Close'] / hist['Close'].cummax()) - 1).min())
+                if max_drawdown > 0:
+                    stock_annual_return = returns.mean() * 252
+                    calmar_ratio = stock_annual_return / max_drawdown
+            except:
+                pass
+            
+            # Build risk metrics with real calculated values
             risk_metrics = {
                 "Volatility (Annualized)": f"{returns.std() * np.sqrt(252) * 100:.2f}%",
-                "Sharpe Ratio": f"{returns.mean() / returns.std() * np.sqrt(252):.2f}",
+                "Sharpe Ratio": f"{returns.mean() / returns.std() * np.sqrt(252):.2f}" if returns.std() > 0 else None,
                 "Max Drawdown": f"{((hist['Close'] / hist['Close'].cummax()) - 1).min() * 100:.2f}%",
                 "VaR (95%)": f"{np.percentile(returns, 5) * 100:.2f}%",
                 "VaR (99%)": f"{np.percentile(returns, 1) * 100:.2f}%",
-                "Expected Shortfall": f"{returns[returns <= np.percentile(returns, 5)].mean() * 100:.2f}%",
-                "Beta": "1.00",  # Placeholder
-                "Alpha": "0.00",  # Placeholder
-                "Information Ratio": "0.00",  # Placeholder
-                "Treynor Ratio": "0.00",  # Placeholder
-                "Calmar Ratio": "0.00"  # Placeholder
+                "Expected Shortfall": f"{returns[returns <= np.percentile(returns, 5)].mean() * 100:.2f}%" if len(returns[returns <= np.percentile(returns, 5)]) > 0 else None,
+                "Beta": f"{beta:.4f}" if beta is not None and not np.isnan(beta) else None,
+                "Alpha": f"{alpha:.4f}" if alpha is not None and not np.isnan(alpha) else None,
+                "Information Ratio": f"{information_ratio:.4f}" if information_ratio is not None and not np.isnan(information_ratio) else None,
+                "Treynor Ratio": f"{treynor_ratio:.4f}" if treynor_ratio is not None and not np.isnan(treynor_ratio) else None,
+                "Calmar Ratio": f"{calmar_ratio:.4f}" if calmar_ratio is not None and not np.isnan(calmar_ratio) else None
             }
         
         return {
@@ -4019,17 +4095,7 @@ async def get_forex_analysis():
                     
             except Exception as e:
                 print(f"Error fetching {pair['symbol']}: {e}")
-                # Add placeholder data
-                forex_data.append({
-                    "symbol": pair["symbol"].replace("=X", ""),
-                    "name": pair["display"],
-                    "price": 0.0,
-                    "change": 0.0,
-                    "change_pct": 0.0,
-                    "volume": 0,
-                    "data_source": "error",
-                    "is_live": False
-                })
+                # Skip pairs with no real data - don't return placeholder
                 continue
         
         # Calculate market sentiment
@@ -4128,18 +4194,7 @@ async def get_crypto_market():
                     
             except Exception as e:
                 print(f"Error fetching {crypto['symbol']}: {e}")
-                # Add placeholder data
-                crypto_data.append({
-                    "symbol": crypto["symbol"].replace("-USD", ""),
-                    "name": crypto["display"],
-                    "price": 0.0,
-                    "change": 0.0,
-                    "change_pct": 0.0,
-                    "volume": 0,
-                    "market_cap": 0,
-                    "data_source": "error",
-                    "is_live": False
-                })
+                # Skip cryptos with no real data - don't return placeholder
                 continue
         
         # Calculate market sentiment
