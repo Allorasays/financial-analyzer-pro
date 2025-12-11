@@ -99,7 +99,7 @@ cache = SimpleCache()
 
 app = FastAPI(
     title="Financial Analyzer Pro API",
-    description="Advanced API for financial data analysis, portfolios, and ML predictions",
+    description="Advanced API for financial data analysis, portfolios, and ML predictions. ALL DATA IS REAL - sourced from yfinance, SEC EDGAR, FRED, and other legitimate financial data providers. No placeholder or dummy data.",
     version="2.0.0"
 )
 
