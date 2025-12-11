@@ -117,3 +117,4 @@ class CacheService:
         except Exception as e:
             logger.error(f"Cache increment error for key {key}: {e}")
             return 0
+

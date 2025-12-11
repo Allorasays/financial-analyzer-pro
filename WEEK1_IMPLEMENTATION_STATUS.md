@@ -205,3 +205,4 @@ npm start
 
 **Next**: Proceed to Week 2 for real-time price updates and portfolio live updates implementation.
 
+

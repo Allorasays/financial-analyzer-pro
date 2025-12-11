@@ -611,3 +611,4 @@ class SentimentAnalysisService:
         except Exception as e:
             logger.error(f"Failed to get sentiment stats: {e}")
             return {"error": str(e)}
+

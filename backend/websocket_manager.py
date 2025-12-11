@@ -157,3 +157,4 @@ class ConnectionManager:
                 for user_id, symbols in self.user_subscriptions.items()
             }
         }
+

@@ -98,3 +98,4 @@ INSERT INTO portfolios (user_id, name, description)
 SELECT id, 'Demo Portfolio', 'Sample portfolio for demonstration'
 FROM users WHERE email = 'demo@example.com'
 ON CONFLICT DO NOTHING;
+
