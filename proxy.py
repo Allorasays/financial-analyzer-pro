@@ -40,6 +40,8 @@ from drawdown_metrics import add_drawdown_features
 from fred_indicators import get_fred_indicators
 from time_features import add_time_features
 from divergence_indicators import add_divergence_features
+from prediction_tracker import prediction_tracker
+from prediction_validator import prediction_validator
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -1855,6 +1857,73 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             )
         except Exception as exc:
             print(f"[ML-METRICS] Logging failed for {ticker}: {exc}")
+        
+        # Store predictions for tracking against actual outcomes
+        try:
+            current_price = response["current_price"]
+            model_version = response["model_metadata"]["model_version"]
+            confidence = response["confidence_score"]
+            r2_score = response["model_metrics"]["r2_score"]
+            features_count = response["model_metadata"]["features_count"]
+            
+            # Store next_day prediction (always available)
+            if response.get("next_day"):
+                prediction_tracker.store_prediction(
+                    ticker=ticker,
+                    predicted_price=response["next_day"],
+                    current_price=current_price,
+                    horizon_days=1,
+                    model_version=model_version,
+                    confidence_score=confidence,
+                    r2_score=r2_score,
+                    features_used=features_count,
+                    prediction_type="next_day"
+                )
+            
+            # Store next_week prediction
+            if response.get("next_week"):
+                prediction_tracker.store_prediction(
+                    ticker=ticker,
+                    predicted_price=response["next_week"],
+                    current_price=current_price,
+                    horizon_days=7,
+                    model_version=model_version,
+                    confidence_score=confidence * 0.95,
+                    r2_score=r2_score,
+                    features_used=features_count,
+                    prediction_type="next_week"
+                )
+            
+            # Store next_month prediction
+            if response.get("next_month"):
+                prediction_tracker.store_prediction(
+                    ticker=ticker,
+                    predicted_price=response["next_month"],
+                    current_price=current_price,
+                    horizon_days=30,
+                    model_version=model_version,
+                    confidence_score=confidence * 0.90,
+                    r2_score=r2_score,
+                    features_used=features_count,
+                    prediction_type="next_month"
+                )
+            
+            # Store next_quarter prediction
+            if response.get("next_quarter"):
+                prediction_tracker.store_prediction(
+                    ticker=ticker,
+                    predicted_price=response["next_quarter"],
+                    current_price=current_price,
+                    horizon_days=90,
+                    model_version=model_version,
+                    confidence_score=confidence * 0.85,
+                    r2_score=r2_score,
+                    features_used=features_count,
+                    prediction_type="next_quarter"
+                )
+        except Exception as exc:
+            print(f"[PREDICTION-TRACKER] Failed to store predictions for {ticker}: {exc}")
+            # Don't fail the request if tracking fails
         
         # Cache the result for 30 minutes to reduce API calls
         cache.set(cache_key, response, ttl=1800)  # 30 minutes cache
@@ -4021,6 +4090,68 @@ async def get_risk_assessment(ticker: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching risk assessment: {str(e)}")
 
+@app.get("/api/prediction-accuracy")
+async def get_prediction_accuracy(
+    ticker: Optional[str] = None,
+    model_version: Optional[str] = None,
+    horizon_days: Optional[int] = None
+):
+    """Get prediction accuracy metrics from validated predictions"""
+    try:
+        metrics = prediction_tracker.calculate_accuracy_metrics(
+            ticker=ticker,
+            model_version=model_version,
+            horizon_days=horizon_days
+        )
+        return {
+            "status": "success",
+            "metrics": metrics,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching accuracy metrics: {str(e)}")
+
+@app.get("/api/prediction-accuracy/recent")
+async def get_recent_accuracy(days: int = 30):
+    """Get accuracy metrics for recent validations"""
+    try:
+        metrics = prediction_tracker.get_recent_accuracy(days=days)
+        return {
+            "status": "success",
+            "metrics": metrics,
+            "period_days": days,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching recent accuracy: {str(e)}")
+
+@app.post("/api/prediction-validate")
+async def validate_predictions(max_days_past: int = 7):
+    """Manually trigger validation of pending predictions"""
+    try:
+        result = prediction_validator.validate_pending_predictions(max_days_past=max_days_past)
+        return {
+            "status": "success",
+            "validation_result": result,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error validating predictions: {str(e)}")
+
+@app.get("/api/prediction-pending")
+async def get_pending_validations(max_days_past: int = 7):
+    """Get list of predictions waiting for validation"""
+    try:
+        pending = prediction_tracker.get_pending_validations(max_days_past=max_days_past)
+        return {
+            "status": "success",
+            "pending_count": len(pending),
+            "pending_predictions": pending,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching pending validations: {str(e)}")
+
 @app.get("/")
 async def root():
     """Root endpoint with API information - returns JSON"""
@@ -4043,6 +4174,7 @@ async def root():
             "market": "/api/market/realtime/{ticker}, /api/market/overview",
             "technical": "/api/technical/{ticker}",
             "ml": "/api/ml/predictions/{ticker}",
+            "prediction_tracking": "/api/prediction-accuracy, /api/prediction-validate, /api/prediction-pending",
             "portfolio": "/api/portfolio, /api/portfolio/add",
             "watchlist": "/api/watchlist, /api/watchlist/add",
             "export": "/api/export/portfolio/csv, /api/export/transactions/csv, /api/export/watchlist/csv, /api/export/portfolio/summary, /api/export/portfolio/performance, /api/export/activity-logs/csv, /api/export/all",

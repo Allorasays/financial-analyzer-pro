@@ -1,5 +1,4 @@
-services:
-  # Backend API (FastAPI via uvicorn)
+# Backend API (FastAPI via uvicorn)
   - type: web
     name: moneta-backend-api
     env: python
@@ -40,3 +39,18 @@ services:
         value: 0.0.0.0
       - key: API_BASE_URL
         value: https://moneta-backend-api.onrender.com
+
+  # Daily Predictions & Validation Job (runs daily at 6 PM ET / 11 PM UTC after market close)
+  - type: cron
+    name: daily-predictions-validation
+    schedule: "0 23 * * *"  # Daily at 11 PM UTC (6 PM ET)
+    env: python
+    buildCommand: python -m pip install --upgrade pip setuptools wheel && python -m pip install -r requirements.txt
+    runCommand: python combined_daily_job.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
+      - key: API_BASE_URL
+        value: https://moneta-backend-api.onrender.com
+      - key: RENDER
+        value: true
