@@ -60,6 +60,21 @@ Add these environment variables:
    - Value: Your NewsAPI key
    - **Why**: News sentiment analysis
 
+6. **SENDGRID_API_KEY** (Optional)
+   - Value: Your SendGrid API key
+   - **Why**: Send password reset and username recovery emails
+   - **Note**: Without this, emails will be logged to console (development mode)
+
+7. **FROM_EMAIL** (Optional, defaults to noreply@moneta-financial.com)
+   - Value: The sender email address (must be verified in SendGrid)
+
+8. **FROM_NAME** (Optional, defaults to "MONETA Financial Analyzer")
+   - Value: The sender name for emails
+
+9. **ENVIRONMENT** (Optional, defaults to "development")
+   - Value: Set to "production" for production mode
+   - **Note**: In development mode, reset tokens and links are returned in API responses for testing
+
 ### How to Add Environment Variables:
 
 1. Go to your **`moneta-backend-api`** service on Render
@@ -131,6 +146,12 @@ After setting up API keys:
 - **Limits**: 5 requests/minute, 500/day (free tier)
 - **Best for**: Company overviews
 
+### SendGrid (Email Service)
+- **Get Free Key**: https://sendgrid.com/free/
+- **Limits**: 100 emails/day (free tier)
+- **Best for**: Password reset emails, username recovery, notifications
+- **Note**: Optional - if not configured, service will use console logging for development
+
 ---
 
 ## Expected Results
@@ -192,4 +213,5 @@ After setting up API keys:
 6. ✅ Verify N/A values are reduced
 
 **Your stock analysis will now show comprehensive real financial data!** 🎉
+
 

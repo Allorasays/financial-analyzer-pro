@@ -197,3 +197,5 @@ envVars:
 All authentication and portfolio endpoints are implemented in code. The main issue is database persistence on Render's free tier.
 
 
+
+

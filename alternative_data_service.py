@@ -457,3 +457,5 @@ def get_comprehensive_alternative_data(ticker: str) -> Dict:
     return alternative_data_service.get_comprehensive_alternative_data(ticker)
 
 
+
+

@@ -177,3 +177,4 @@ The backend endpoint returns 80+ financial metrics including:
 
 **Rebuild the app in Android Studio to see the improvements!** 🚀
 
+

@@ -69,6 +69,15 @@ except ImportError as e:
     print(f"Alternative data service not available: {e}")
     ALTERNATIVE_DATA_AVAILABLE = False
 
+# Import email service
+try:
+    from email_service import email_service
+    EMAIL_SERVICE_AVAILABLE = True
+except ImportError as e:
+    print(f"Email service not available: {e}")
+    EMAIL_SERVICE_AVAILABLE = False
+    email_service = None
+
 load_dotenv()
 
 # Simple cache implementation for ML predictions
@@ -2046,18 +2055,30 @@ async def forgot_password(request: ForgotPasswordRequest):
         if not success:
             raise HTTPException(status_code=500, detail="Failed to create reset token")
         
-        # In production, send email here with reset link
-        # For now, return token (in production, don't return token, send via email)
-        # TODO: Integrate email service (SendGrid, AWS SES, etc.)
-        print(f"[PASSWORD RESET] Token for {request.email}: {reset_token}")
-        print(f"[PASSWORD RESET] Reset link: https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}")
+        # Send password reset email
+        email_sent = False
+        if EMAIL_SERVICE_AVAILABLE and email_service:
+            try:
+                email_sent = email_service.send_password_reset_email(
+                    to_email=request.email,
+                    reset_token=reset_token,
+                    username=user_data.get('username')
+                )
+            except Exception as e:
+                print(f"[PASSWORD RESET] Failed to send email: {e}")
+        
+        # In development mode, also log to console
+        if os.getenv("ENVIRONMENT") == "development":
+            print(f"[PASSWORD RESET] Token for {request.email}: {reset_token}")
+            print(f"[PASSWORD RESET] Reset link: https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}")
         
         return {
             "message": "If an account exists with this email, a password reset link has been sent.",
             "success": True,
-            # Remove this in production - only for development/testing
+            # Only include token/link in development mode for testing
             "reset_token": reset_token if os.getenv("ENVIRONMENT") == "development" else None,
-            "reset_link": f"https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}" if os.getenv("ENVIRONMENT") == "development" else None
+            "reset_link": f"https://moneta-backend-api.onrender.com/api/auth/reset-password?token={reset_token}" if os.getenv("ENVIRONMENT") == "development" else None,
+            "email_sent": email_sent
         }
         
     except Exception as e:
@@ -2113,16 +2134,27 @@ async def forgot_username(request: ForgotUsernameRequest):
                 "success": True
             }
         
-        # In production, send email here with username
-        # For now, return username (in production, send via email only)
-        # TODO: Integrate email service (SendGrid, AWS SES, etc.)
-        print(f"[USERNAME RECOVERY] Username for {request.email}: {user_data['username']}")
+        # Send username recovery email
+        email_sent = False
+        if EMAIL_SERVICE_AVAILABLE and email_service:
+            try:
+                email_sent = email_service.send_username_recovery_email(
+                    to_email=request.email,
+                    username=user_data['username']
+                )
+            except Exception as e:
+                print(f"[USERNAME RECOVERY] Failed to send email: {e}")
+        
+        # In development mode, also log to console
+        if os.getenv("ENVIRONMENT") == "development":
+            print(f"[USERNAME RECOVERY] Username for {request.email}: {user_data['username']}")
         
         return {
             "message": "If an account exists with this email, the username has been sent.",
             "success": True,
-            # Remove this in production - only for development/testing
-            "username": user_data['username'] if os.getenv("ENVIRONMENT") == "development" else None
+            # Only include username in development mode for testing
+            "username": user_data['username'] if os.getenv("ENVIRONMENT") == "development" else None,
+            "email_sent": email_sent
         }
         
     except Exception as e:

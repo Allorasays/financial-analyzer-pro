@@ -227,3 +227,4 @@ curl http://localhost:8000/api/prediction-accuracy/recent?days=30
 - Validations look back up to 7 days by default (configurable)
 - Market holidays: System uses closest trading day if target date is a holiday
 
+
