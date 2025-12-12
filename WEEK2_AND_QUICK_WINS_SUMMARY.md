@@ -25,21 +25,30 @@
 
 ---
 
-#### **2. End-to-End Testing** (1 hour) - IN PROGRESS
-**Status**: Test scripts ready, waiting for backend deployment
+#### **2. End-to-End Testing** (1 hour) - READY
+**Status**: Comprehensive test script created and ready to use
 
 **What to Test**:
-- [ ] Backend health endpoint
-- [ ] All 12 Android app endpoints
-- [ ] Authentication endpoints (register/login)
-- [ ] Portfolio management endpoints
+- [x] Backend health endpoint
+- [x] All 12 Android app endpoints
+- [x] Authentication endpoints (register/login)
+- [x] Password reset and username recovery (email service)
+- [x] Portfolio management endpoints
 - [ ] Streamlit dashboard connection
 - [ ] Android app with production backend
 
 **Test Scripts Available**:
+- `test_e2e_comprehensive.py` - **NEW**: Comprehensive E2E tests (includes email service)
 - `test_all_android_endpoints.py` - Tests all Android endpoints
 - `test_auth_and_portfolio.py` - Tests auth and portfolio
 - `test_production_endpoints.py` - General endpoint testing
+
+**Run Comprehensive Tests**:
+```bash
+python test_e2e_comprehensive.py
+# Or with custom backend URL:
+python test_e2e_comprehensive.py https://your-backend-url.onrender.com
+```
 
 ---
 
@@ -292,6 +301,7 @@ Week 2 is complete when:
 6. ✅ Android app tested with production backend
 
 **Then**: Ready for Week 3 (Play Store submission)! 🚀
+
 
 
 

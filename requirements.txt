@@ -26,3 +26,5 @@ vaderSentiment>=3.3.0
 # transformers and torch removed for deployment simplicity
 # ccxt>=4.0.0
 # forex-python>=1.0.0
+# Email service (optional - for password reset and notifications)
+sendgrid>=6.10.0
