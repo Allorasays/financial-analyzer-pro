@@ -3140,29 +3140,59 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 val financialData: FinancialDataResponse? = try {
                     Log.d("MainActivity", "Fetching financial data from backend API for $ticker")
                     val response = apiService.getFinancialData(ticker.uppercase())
-                    if (response.isSuccessful && response.body() != null) {
-                        Log.d("MainActivity", "✅ Backend financial data fetched successfully for $ticker")
-                        response.body()
+                    Log.d("MainActivity", "Backend API response code: ${response.code()}, isSuccessful: ${response.isSuccessful}")
+                    
+                    if (response.isSuccessful) {
+                        val body = response.body()
+                        Log.d("MainActivity", "Response body is null: ${body == null}")
+                        
+                        if (body != null) {
+                            // Verify we have actual data (not just empty structure)
+                            val hasData = body.current_price != null || 
+                                        body.revenue != null || 
+                                        body.market_cap != null ||
+                                        body.pe_ratio != null
+                            
+                            if (hasData) {
+                                Log.d("MainActivity", "✅ Backend financial data fetched successfully for $ticker with real values")
+                                body
+                            } else {
+                                Log.w("MainActivity", "Backend API returned empty data structure for $ticker")
+                                null
+                            }
+                        } else {
+                            Log.w("MainActivity", "Backend API returned null body for $ticker")
+                            null
+                        }
                     } else {
                         Log.w("MainActivity", "Backend API returned error: ${response.code()} - ${response.message()}")
+                        val errorBody = response.errorBody()?.string()
+                        Log.w("MainActivity", "Error body: $errorBody")
                         null
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Error fetching financial data from backend: ${e.message}", e)
+                    Log.e("MainActivity", "Exception type: ${e.javaClass.simpleName}")
+                    e.printStackTrace()
                     null
                 }
                 
-                // FALLBACK: If backend fails, use direct FMP calls (legacy method)
-                val financialStatements: FinancialStatements? = if (financialData == null) {
-                    Log.d("MainActivity", "Backend API unavailable, using fallback method for $ticker")
+                // FALLBACK: Always use direct FMP calls if backend fails or returns empty data
+                val financialStatements: FinancialStatements? = if (financialData == null || 
+                    (financialData.current_price == null && financialData.revenue == null && financialData.market_cap == null)) {
+                    Log.d("MainActivity", "Backend API unavailable or returned empty data, using fallback method for $ticker")
                     try {
-                        val stockData = fetchStockFinancialData(ticker)
-                        generateFinancialStatements(ticker, stockData)
+                        val stockDataFallback = fetchStockFinancialData(ticker)
+                        val fallbackStatements = generateFinancialStatements(ticker, stockDataFallback)
+                        Log.d("MainActivity", "✅ Fallback method succeeded for $ticker")
+                        fallbackStatements
                     } catch (e: Exception) {
-                        Log.e("MainActivity", "Fallback method also failed: ${e.message}")
+                        Log.e("MainActivity", "Fallback method also failed: ${e.message}", e)
+                        e.printStackTrace()
                         null
                     }
                 } else {
+                    Log.d("MainActivity", "Backend data is valid, skipping fallback for $ticker")
                     null // Don't need legacy method if backend worked
                 }
                 
@@ -3180,24 +3210,23 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 
                 // Update UI on main thread
                 withContext(Dispatchers.Main) {
-                    Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker!", Toast.LENGTH_SHORT).show()
-                    // Use backend data if available, otherwise use legacy financial statements
-                    if (financialData != null) {
+                    // Determine which data to use - prefer backend if it has real data
+                    val useBackendData = financialData != null && 
+                        (financialData.current_price != null || financialData.revenue != null || financialData.market_cap != null)
+                    
+                    if (useBackendData) {
+                        Log.d("MainActivity", "Using backend financial data for $ticker")
+                        Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Backend API)", Toast.LENGTH_SHORT).show()
                         showStockAnalysisDialogWithBackendData(ticker, stockData, financialData, mlPredictions, sentimentData)
                     } else if (financialStatements != null) {
+                        Log.d("MainActivity", "Using fallback financial data for $ticker")
+                        Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Fallback)", Toast.LENGTH_SHORT).show()
                         showStockAnalysisDialog(ticker, stockData, financialStatements, mlPredictions, sentimentData)
                     } else {
-                        // Show error if both methods failed
-                        android.app.AlertDialog.Builder(this@MainActivityLiveRealData)
-                            .setTitle("❌ Error Analyzing $ticker")
-                            .setMessage("Unable to fetch financial data for $ticker.\n\n" +
-                                       "Both backend API and fallback methods failed.\n\n" +
-                                       "Please check your internet connection and try again.")
-                            .setPositiveButton("Retry") { _, _ ->
-                                analyzeStock(ticker)
-                            }
-                            .setNegativeButton("OK", null)
-                            .show()
+                        // Last resort: Show basic analysis with just stock data and ML predictions
+                        Log.w("MainActivity", "Both backend and fallback failed, showing basic analysis for $ticker")
+                        Toast.makeText(this@MainActivityLiveRealData, "⚠️ Limited data available for $ticker", Toast.LENGTH_SHORT).show()
+                        showBasicStockAnalysisDialog(ticker, stockData, mlPredictions, sentimentData)
                     }
                 }
             } catch (e: Exception) {
@@ -4138,6 +4167,113 @@ class MainActivityLiveRealData : AppCompatActivity() {
         analysisLayout.addView(analystSection)
         analysisLayout.addView(mlSection)
         analysisLayout.addView(sentimentSection)
+
+        scrollView.addView(analysisLayout)
+        dialog.setView(scrollView)
+        dialog.setPositiveButton("Close") { dialogInterface, _ ->
+            dialogInterface.dismiss()
+        }
+        dialog.show()
+    }
+    
+    /**
+     * Show basic stock analysis when financial data is unavailable
+     * Displays price data, ML predictions, and sentiment - ensures user always sees some data
+     */
+    private fun showBasicStockAnalysisDialog(
+        ticker: String,
+        stockData: StockAnalysisData,
+        mlPredictions: MLPredictionsData,
+        sentimentData: SentimentData?
+    ) {
+        val dialog = android.app.AlertDialog.Builder(this)
+        val scrollView = ScrollView(this)
+        val analysisLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(30, 30, 30, 30)
+            setBackgroundColor(android.graphics.Color.parseColor("#1a1a1a"))
+        }
+
+        val analysisTitle = TextView(this).apply {
+            text = "📊 Stock Analysis: $ticker\n⚠️ Limited Financial Data Available"
+            textSize = 22f
+            setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            gravity = android.view.Gravity.CENTER
+            setPadding(0, 0, 0, 20)
+        }
+
+        // Current Price Section
+        val priceSection = TextView(this).apply {
+            text = "💰 Current Market Data\n" +
+                   "Current Price: $${String.format("%.2f", stockData.currentPrice)}\n" +
+                   "Change: $${String.format("%.2f", stockData.change)} (${String.format("%.2f", stockData.changePercent)}%)\n" +
+                   "Day Range: $${String.format("%.2f", stockData.dayLow)} - $${String.format("%.2f", stockData.dayHigh)}\n" +
+                   "52-Week Range: $${String.format("%.2f", stockData.yearLow)} - $${String.format("%.2f", stockData.yearHigh)}\n" +
+                   "Volume: ${formatNumber(stockData.volume)}\n" +
+                   "Market Cap: $${formatNumber(stockData.marketCap)}"
+            textSize = 18f
+            setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            setPadding(0, 0, 0, 20)
+        }
+
+        // Basic Metrics
+        val basicMetricsSection = TextView(this).apply {
+            text = "📊 Basic Metrics\n" +
+                   "P/E Ratio: ${if (stockData.peRatio > 0) String.format("%.2f", stockData.peRatio) else "N/A"}\n" +
+                   "EPS: ${if (stockData.eps > 0) String.format("%.2f", stockData.eps) else "N/A"}\n" +
+                   "Dividend Yield: ${if (stockData.dividendYield > 0) String.format("%.2f", stockData.dividendYield) + "%" else "N/A"}"
+            textSize = 16f
+            setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            setPadding(0, 0, 0, 15)
+        }
+
+        // ML Predictions
+        val mlSection = TextView(this).apply {
+            text = "🤖 ML Predictions\n" +
+                   "Next Day: $${String.format("%.2f", mlPredictions.nextDay)} (${getPredictionChangePercent(mlPredictions.nextDay, stockData.currentPrice)})\n" +
+                   "Next Week: $${String.format("%.2f", mlPredictions.nextWeek)} (${getPredictionChangePercent(mlPredictions.nextWeek, stockData.currentPrice)})\n" +
+                   "Next Month: $${String.format("%.2f", mlPredictions.nextMonth)} (${getPredictionChangePercent(mlPredictions.nextMonth, stockData.currentPrice)})\n" +
+                   "Confidence: ${String.format("%.1f", mlPredictions.confidence)}%\n" +
+                   "Accuracy: ${String.format("%.1f", mlPredictions.accuracy * 100)}%"
+            textSize = 16f
+            setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            setPadding(0, 0, 0, 15)
+        }
+
+        // Sentiment
+        val sentimentSection = TextView(this).apply {
+            text = if (sentimentData != null) {
+                "📊 Sentiment Analysis\n" +
+                "Overall: ${sentimentData.overallSentiment}\n" +
+                "Score: ${String.format("%.3f", sentimentData.sentimentScore)}\n" +
+                "Confidence: ${String.format("%.1f", sentimentData.confidence * 100)}%"
+            } else {
+                "📊 Sentiment Analysis\nData unavailable"
+            }
+            textSize = 16f
+            setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
+            setPadding(0, 0, 0, 15)
+        }
+
+        // Warning Message
+        val warningSection = TextView(this).apply {
+            text = "⚠️ Note: Comprehensive financial data (revenue, margins, ratios) is currently unavailable.\n\n" +
+                   "This may be due to:\n" +
+                   "• Backend API temporarily unavailable\n" +
+                   "• Network connectivity issues\n" +
+                   "• Data source limitations\n\n" +
+                   "Basic market data and ML predictions are still available."
+            textSize = 14f
+            setTextColor(android.graphics.Color.parseColor("#FFA726"))
+            setPadding(0, 0, 0, 15)
+        }
+
+        analysisLayout.addView(analysisTitle)
+        analysisLayout.addView(priceSection)
+        analysisLayout.addView(basicMetricsSection)
+        analysisLayout.addView(mlSection)
+        analysisLayout.addView(sentimentSection)
+        analysisLayout.addView(warningSection)
 
         scrollView.addView(analysisLayout)
         dialog.setView(scrollView)
