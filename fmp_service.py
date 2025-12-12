@@ -1,0 +1,201 @@
+"""
+Financial Modeling Prep (FMP) API Service
+Provides comprehensive financial data including income statements, balance sheets, cash flow, ratios, and key metrics
+"""
+
+import requests
+import os
+import logging
+from typing import Dict, Any, Optional
+from datetime import datetime
+
+logger = logging.getLogger(__name__)
+
+class FMPService:
+    """Service for fetching data from Financial Modeling Prep API"""
+    
+    def __init__(self):
+        # Get API key from environment variable or use default
+        self.api_key = os.getenv('FMP_API_KEY', 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve')
+        self.base_url = "https://financialmodelingprep.com/api/v3"
+        self.enabled = bool(self.api_key)
+    
+    def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
+        """Make API request to FMP"""
+        if not self.enabled:
+            return None
+        
+        try:
+            url = f"{self.base_url}/{endpoint}"
+            if params is None:
+                params = {}
+            params['apikey'] = self.api_key
+            
+            response = requests.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            return data if data else None
+            
+        except Exception as e:
+            logger.error(f"FMP API request failed for {endpoint}: {e}")
+            return None
+    
+    def get_key_metrics(self, ticker: str) -> Optional[Dict]:
+        """Get key financial metrics"""
+        data = self._make_request(f"key-metrics/{ticker}", {'limit': 1})
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_financial_ratios(self, ticker: str) -> Optional[Dict]:
+        """Get financial ratios"""
+        data = self._make_request(f"ratios/{ticker}", {'limit': 1})
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_income_statement(self, ticker: str) -> Optional[Dict]:
+        """Get income statement"""
+        data = self._make_request(f"income-statement/{ticker}", {'limit': 1})
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_balance_sheet(self, ticker: str) -> Optional[Dict]:
+        """Get balance sheet"""
+        data = self._make_request(f"balance-sheet-statement/{ticker}", {'limit': 1})
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_cash_flow(self, ticker: str) -> Optional[Dict]:
+        """Get cash flow statement"""
+        data = self._make_request(f"cash-flow-statement/{ticker}", {'limit': 1})
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_company_profile(self, ticker: str) -> Optional[Dict]:
+        """Get company profile"""
+        data = self._make_request(f"profile/{ticker}")
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_quote(self, ticker: str) -> Optional[Dict]:
+        """Get real-time quote"""
+        data = self._make_request(f"quote/{ticker}")
+        return data[0] if data and len(data) > 0 else None
+    
+    def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
+        """Get comprehensive financial data from multiple FMP endpoints"""
+        if not self.enabled:
+            return {}
+        
+        try:
+            # Fetch all data in parallel (or sequentially with error handling)
+            metrics = self.get_key_metrics(ticker)
+            ratios = self.get_financial_ratios(ticker)
+            income = self.get_income_statement(ticker)
+            balance = self.get_balance_sheet(ticker)
+            cash_flow = self.get_cash_flow(ticker)
+            profile = self.get_company_profile(ticker)
+            quote = self.get_quote(ticker)
+            
+            # Combine all data into comprehensive structure
+            financial_data = {}
+            
+            # From Income Statement
+            if income:
+                financial_data.update({
+                    'revenue': income.get('revenue'),
+                    'gross_profit': income.get('grossProfit'),
+                    'operating_income': income.get('operatingIncome'),
+                    'net_income': income.get('netIncome'),
+                    'ebitda': income.get('ebitda'),
+                    'operating_expenses': income.get('operatingExpenses'),
+                    'depreciation_amortization': income.get('depreciationAndAmortization'),
+                    'interest_expense': income.get('interestExpense'),
+                    'income_tax_expense': income.get('incomeTaxExpense'),
+                })
+            
+            # From Balance Sheet
+            if balance:
+                financial_data.update({
+                    'total_assets': balance.get('totalAssets'),
+                    'total_current_assets': balance.get('totalCurrentAssets'),
+                    'cash_and_equivalents': balance.get('cashAndCashEquivalents'),
+                    'total_liabilities': balance.get('totalLiabilities'),
+                    'total_current_liabilities': balance.get('totalCurrentLiabilities'),
+                    'total_debt': balance.get('totalDebt'),
+                    'total_equity': balance.get('totalStockholdersEquity'),
+                    'retained_earnings': balance.get('retainedEarnings'),
+                })
+            
+            # From Cash Flow
+            if cash_flow:
+                financial_data.update({
+                    'operating_cash_flow': cash_flow.get('operatingCashFlow'),
+                    'free_cash_flow': cash_flow.get('freeCashFlow'),
+                    'capital_expenditure': cash_flow.get('capitalExpenditure'),
+                    'dividends_paid': cash_flow.get('dividendsPaid'),
+                })
+            
+            # From Key Metrics
+            if metrics:
+                financial_data.update({
+                    'pe_ratio': metrics.get('peRatio'),
+                    'price_to_book': metrics.get('pbRatio'),
+                    'price_to_sales': metrics.get('priceToSalesRatio'),
+                    'enterprise_value': metrics.get('enterpriseValue'),
+                    'ev_to_revenue': metrics.get('evToSales'),
+                    'ev_to_ebitda': metrics.get('evToEbitda'),
+                    'market_cap': metrics.get('marketCap'),
+                    'shares_outstanding': metrics.get('sharesOutstanding'),
+                })
+            
+            # From Ratios
+            if ratios:
+                financial_data.update({
+                    'current_ratio': ratios.get('currentRatio'),
+                    'quick_ratio': ratios.get('quickRatio'),
+                    'debt_to_equity': ratios.get('debtEquityRatio'),
+                    'debt_to_assets': ratios.get('debtRatio'),
+                    'return_on_equity': ratios.get('returnOnEquity'),
+                    'return_on_assets': ratios.get('returnOnAssets'),
+                    'return_on_invested_capital': ratios.get('returnOnCapitalEmployed'),
+                    'gross_margin': ratios.get('grossProfitMargin'),
+                    'operating_margin': ratios.get('operatingProfitMargin'),
+                    'net_margin': ratios.get('netProfitMargin'),
+                    'asset_turnover': ratios.get('assetTurnover'),
+                    'inventory_turnover': ratios.get('inventoryTurnover'),
+                })
+            
+            # From Profile
+            if profile:
+                financial_data.update({
+                    'company_name': profile.get('companyName'),
+                    'industry': profile.get('industry'),
+                    'sector': profile.get('sector'),
+                    'website': profile.get('website'),
+                    'description': profile.get('description'),
+                    'ceo': profile.get('ceo'),
+                    'employees': profile.get('fullTimeEmployees'),
+                })
+            
+            # From Quote
+            if quote:
+                financial_data.update({
+                    'current_price': quote.get('price'),
+                    'price_change': quote.get('change'),
+                    'price_change_percent': quote.get('changesPercentage'),
+                    'day_low': quote.get('dayLow'),
+                    'day_high': quote.get('dayHigh'),
+                    'year_low': quote.get('yearLow'),
+                    'year_high': quote.get('yearHigh'),
+                    'volume': quote.get('volume'),
+                    'avg_volume': quote.get('avgVolume'),
+                    'market_cap': quote.get('marketCap') or financial_data.get('market_cap'),
+                })
+            
+            financial_data['data_source'] = 'FMP'
+            financial_data['timestamp'] = datetime.now().isoformat()
+            
+            return financial_data
+            
+        except Exception as e:
+            logger.error(f"Error fetching comprehensive FMP data for {ticker}: {e}")
+            return {}
+
+# Global instance
+fmp_service = FMPService()
+
