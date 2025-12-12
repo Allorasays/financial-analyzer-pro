@@ -42,6 +42,7 @@ from time_features import add_time_features
 from divergence_indicators import add_divergence_features
 from prediction_tracker import prediction_tracker
 from prediction_validator import prediction_validator
+from fmp_service import fmp_service
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -2970,8 +2971,25 @@ async def get_stock_data(ticker: str):
 
 @app.get("/api/financials/{ticker}")
 async def get_financial_metrics(ticker: str):
-    """Get comprehensive financial metrics - all data points for real stock analysis"""
+    """Get comprehensive financial metrics - all data points for real stock analysis
+    Uses FMP (Financial Modeling Prep) API first, then falls back to yfinance for maximum data coverage
+    """
     try:
+        financial_data = {}
+        
+        # PRIORITY 1: Try FMP API first (best comprehensive data)
+        try:
+            fmp_data = fmp_service.get_comprehensive_financial_data(ticker)
+            if fmp_data and len(fmp_data) > 2:  # Has actual data, not just timestamp
+                print(f"[FMP] Successfully fetched comprehensive data for {ticker}")
+                financial_data = fmp_data
+                financial_data['ticker'] = ticker.upper()
+                return financial_data
+        except Exception as e:
+            print(f"[FMP] Failed for {ticker}: {e}")
+        
+        # PRIORITY 2: Fallback to yfinance (good coverage but some gaps)
+        print(f"[yfinance] Using fallback for {ticker}")
         stock = yf.Ticker(ticker)
         info = stock.info
         
@@ -2986,7 +3004,7 @@ async def get_financial_metrics(ticker: str):
                 return None
             return value
         
-        # Comprehensive financial data
+        # Comprehensive financial data from yfinance
         financial_data = {
             # Company Information
             "ticker": ticker.upper(),
@@ -3107,6 +3125,8 @@ async def get_financial_metrics(ticker: str):
             "timestamp": datetime.now().isoformat(),
             "data_source": "yfinance"
         }
+        
+        financial_data['ticker'] = ticker.upper()
         
         # Remove None values to reduce payload size (frontend can handle missing keys)
         # But keep structure for easier frontend parsing
