@@ -3012,27 +3012,47 @@ async def get_financial_metrics(ticker: str):
         # PRIORITY 1: Try FMP API first (best comprehensive data)
         try:
             fmp_data = fmp_service.get_comprehensive_financial_data(ticker)
-            if fmp_data and len(fmp_data) > 2:  # Has actual data, not just timestamp
-                print(f"[FMP] Successfully fetched comprehensive data for {ticker}")
-                financial_data = fmp_data
-                financial_data['ticker'] = ticker.upper()
-                return financial_data
+            # Check if we have meaningful financial data (more than just metadata)
+            if fmp_data and isinstance(fmp_data, dict):
+                # Count actual financial data fields (exclude metadata)
+                data_fields = [k for k in fmp_data.keys() if k not in ['data_source', 'timestamp', 'ticker']]
+                financial_values = [v for k, v in fmp_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None]
+                
+                if len(financial_values) > 5:  # Need at least 5 actual data points
+                    print(f"[FMP] Successfully fetched comprehensive data for {ticker}: {len(financial_values)} fields")
+                    financial_data = fmp_data
+                    financial_data['ticker'] = ticker.upper()
+                    return financial_data
+                else:
+                    print(f"[FMP] Insufficient data for {ticker}: only {len(financial_values)} values found")
         except Exception as e:
             print(f"[FMP] Failed for {ticker}: {e}")
+            import traceback
+            traceback.print_exc()
         
         # PRIORITY 2: Fallback to yfinance (good coverage but some gaps)
         print(f"[yfinance] Using fallback for {ticker}")
         stock = yf.Ticker(ticker)
         info = stock.info
         
-        # Helper function to safely get values (returns None for missing data, but allows 0 for valid metrics)
-        def safe_get(key, default=None, allow_zero=False):
+        # Helper function to safely get values - preserve 0 as valid value by default
+        def safe_get(key, default=None, allow_zero=True):
+            """Get value from info dict, preserving 0 and False as valid values"""
             value = info.get(key, default)
-            # Return None for missing/invalid values, but allow 0 if explicitly requested (e.g., for volume)
+            # Only return None for truly missing/invalid values
             if value is None or value == '':
                 return None
+            # Handle NaN and infinity values
+            try:
+                if isinstance(value, float):
+                    import math
+                    if math.isnan(value) or math.isinf(value):
+                        return None
+            except:
+                pass
+            # For most financial metrics, 0 is a valid value (debt can be 0, growth can be 0%, etc.)
+            # Only filter out 0 if explicitly requested
             if not allow_zero and value == 0:
-                # For most financial metrics, 0 means missing data
                 return None
             return value
         

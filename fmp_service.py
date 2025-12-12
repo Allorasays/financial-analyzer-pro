@@ -23,6 +23,7 @@ class FMPService:
     def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
         """Make API request to FMP"""
         if not self.enabled:
+            logger.warning(f"FMP service not enabled (no API key)")
             return None
         
         try:
@@ -31,12 +32,37 @@ class FMPService:
                 params = {}
             params['apikey'] = self.api_key
             
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
+            
+            # Check for API errors in response
+            if isinstance(data, dict) and 'Error Message' in data:
+                logger.error(f"FMP API error for {endpoint}: {data.get('Error Message')}")
+                return None
+            
+            # Check for rate limiting or invalid API key
+            if isinstance(data, dict) and ('Note' in data or 'message' in data):
+                error_msg = data.get('Note') or data.get('message', '')
+                if 'limit' in error_msg.lower() or 'subscription' in error_msg.lower():
+                    logger.warning(f"FMP API limit/subscription issue for {endpoint}: {error_msg}")
+                else:
+                    logger.error(f"FMP API message for {endpoint}: {error_msg}")
+                return None
+            
             return data if data else None
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"FMP API authentication failed - check API key for {endpoint}")
+            elif e.response.status_code == 403:
+                logger.error(f"FMP API access forbidden - check subscription for {endpoint}")
+            elif e.response.status_code == 429:
+                logger.warning(f"FMP API rate limit exceeded for {endpoint}")
+            else:
+                logger.error(f"FMP API HTTP error for {endpoint}: {e.response.status_code} - {e}")
+            return None
         except Exception as e:
             logger.error(f"FMP API request failed for {endpoint}: {e}")
             return None
@@ -190,10 +216,18 @@ class FMPService:
             financial_data['data_source'] = 'FMP'
             financial_data['timestamp'] = datetime.now().isoformat()
             
+            # Log what we got
+            data_count = len([v for v in financial_data.values() if v is not None and v != ''])
+            logger.info(f"FMP comprehensive data for {ticker}: {data_count} non-null fields")
+            
+            # If we have very little data, log a warning
+            if data_count < 10:
+                logger.warning(f"FMP returned limited data for {ticker}: only {data_count} fields")
+            
             return financial_data
             
         except Exception as e:
-            logger.error(f"Error fetching comprehensive FMP data for {ticker}: {e}")
+            logger.error(f"Error fetching comprehensive FMP data for {ticker}: {e}", exc_info=True)
             return {}
 
 # Global instance
