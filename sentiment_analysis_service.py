@@ -493,3 +493,24 @@ class SentimentAnalysisService:
 
 # Global instance
 sentiment_service = SentimentAnalysisService()
+
+
+def get_sentiment_analysis(ticker: str) -> Dict[str, Any]:
+    """Return sentiment summary for FastAPI / ML features (no Streamlit UI)."""
+    t = (ticker or "").upper()
+    news = sentiment_service.analyze_news_sentiment(t, days_back=7)
+    social = sentiment_service.analyze_social_sentiment(t, "twitter", days_back=7)
+
+    agg = news.get("aggregate_sentiment") or {}
+    if not agg or "error" in agg:
+        agg = {"overall_sentiment": "neutral", "average_polarity": 0.0, "sentiment_distribution": {}}
+
+    dist = agg.get("sentiment_distribution") or {}
+    return {
+        "overall_sentiment": agg.get("overall_sentiment", "neutral"),
+        "sentiment_score": float(agg.get("average_polarity") or 0.0),
+        "positive_ratio": float(dist.get("positive") or 0.0),
+        "negative_ratio": float(dist.get("negative") or 0.0),
+        "news_sentiment": news,
+        "social_sentiment": social,
+    }

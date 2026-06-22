@@ -79,6 +79,12 @@ class AdvancedFinancialAnalytics:
                 current_assets = balance_sheet.loc['Current Assets', latest_year] if 'Current Assets' in balance_sheet.index else 0
                 current_liabilities = balance_sheet.loc['Current Liabilities', latest_year] if 'Current Liabilities' in balance_sheet.index else 0
                 cash = balance_sheet.loc['Cash And Cash Equivalents', latest_year] if 'Cash And Cash Equivalents' in balance_sheet.index else 0
+                inventory = 0.0
+                for _inv_key in ('Inventory', 'Inventories'):
+                    if _inv_key in balance_sheet.index:
+                        _inv = balance_sheet.loc[_inv_key, latest_year]
+                        inventory = float(_inv) if pd.notna(_inv) else 0.0
+                        break
                 
                 # Cash flow data
                 operating_cashflow = cashflow.loc['Total Cash From Operating Activities', latest_year] if 'Total Cash From Operating Activities' in cashflow.index else 0
@@ -92,9 +98,9 @@ class AdvancedFinancialAnalytics:
                 ratios['roe'] = (net_income / total_equity * 100) if total_equity > 0 else 0
                 ratios['roa'] = (net_income / total_assets * 100) if total_assets > 0 else 0
                 
-                # Liquidity Ratios
+                # Liquidity Ratios (quick = acid-test: current assets less inventory)
                 ratios['current_ratio'] = current_assets / current_liabilities if current_liabilities > 0 else 0
-                ratios['quick_ratio'] = (current_assets - cash) / current_liabilities if current_liabilities > 0 else 0
+                ratios['quick_ratio'] = (current_assets - inventory) / current_liabilities if current_liabilities > 0 else 0
                 ratios['cash_ratio'] = cash / current_liabilities if current_liabilities > 0 else 0
                 
                 # Leverage Ratios
@@ -167,20 +173,24 @@ class AdvancedFinancialAnalytics:
             if len(fcf_data) < 4:  # Need at least 1 year of data
                 return {}
             
-            # Calculate growth rates
-            fcf_values = fcf_data.values
-            growth_rates = []
+            # Quarterly columns are newest-first (yfinance); TTM = sum of last 4 quarters
+            fcf_values = np.asarray(fcf_data.values, dtype=float)
+            ttm_fcf = float(np.sum(fcf_values[:4])) if len(fcf_values) >= 4 else float(fcf_values[0]) * 4.0
             
+            # QoQ growth: (Q_t - Q_{t+1}) / |Q_{t+1}| with index 0 = most recent quarter
+            growth_rates = []
             for i in range(1, len(fcf_values)):
-                if fcf_values[i-1] != 0:
-                    growth_rate = (fcf_values[i] - fcf_values[i-1]) / abs(fcf_values[i-1])
+                if fcf_values[i] != 0:
+                    growth_rate = (fcf_values[i - 1] - fcf_values[i]) / abs(fcf_values[i])
                     growth_rates.append(growth_rate)
             
-            # Average growth rate (last 3 quarters)
-            avg_growth_rate = np.mean(growth_rates[-3:]) if len(growth_rates) >= 3 else np.mean(growth_rates) if growth_rates else 0.05
-            
-            # Cap growth rate between -50% and 50%
-            avg_growth_rate = max(-0.5, min(0.5, avg_growth_rate))
+            # Average quarterly growth (last 3 periods), capped; convert to annual for yearly steps
+            avg_quarterly_growth = np.mean(growth_rates[-3:]) if len(growth_rates) >= 3 else (
+                np.mean(growth_rates) if growth_rates else 0.0125
+            )
+            avg_quarterly_growth = max(-0.5, min(0.5, avg_quarterly_growth))
+            annual_growth_rate = (1.0 + avg_quarterly_growth) ** 4 - 1.0
+            annual_growth_rate = max(-0.5, min(0.5, annual_growth_rate))
             
             # Terminal growth rate (assume 3% long-term)
             terminal_growth_rate = 0.03
@@ -191,23 +201,18 @@ class AdvancedFinancialAnalytics:
             market_risk_premium = self.market_return - risk_free_rate
             cost_of_equity = risk_free_rate + beta * market_risk_premium
             
-            # Assume cost of debt is 5%
-            cost_of_debt = 0.05
-            tax_rate = 0.25  # Assume 25% tax rate
-            
             # Simple WACC calculation (assuming 100% equity for simplicity)
             wacc = cost_of_equity
             
-            # Project FCF for next 5 years
-            current_fcf = fcf_values[0]
+            # Project annual FCF for next 5 years from TTM base
             projected_fcf = []
-            
             for year in range(1, 6):
-                projected_fcf.append(current_fcf * ((1 + avg_growth_rate) ** year))
+                projected_fcf.append(ttm_fcf * ((1 + annual_growth_rate) ** year))
             
             # Calculate terminal value
             terminal_fcf = projected_fcf[-1] * (1 + terminal_growth_rate)
-            terminal_value = terminal_fcf / (wacc - terminal_growth_rate)
+            denom = max(wacc - terminal_growth_rate, 0.01)
+            terminal_value = terminal_fcf / denom
             
             # Discount projected FCF and terminal value
             present_value_fcf = []
@@ -220,17 +225,32 @@ class AdvancedFinancialAnalytics:
             # Enterprise value
             enterprise_value = sum(present_value_fcf) + terminal_pv
             
+            # Equity value = EV - net debt (per-share valuation uses equity, not EV)
+            total_debt = info.get('totalDebt') or 0
+            if total_debt is None or (isinstance(total_debt, float) and np.isnan(total_debt)):
+                total_debt = 0
+            else:
+                total_debt = float(total_debt)
+            total_cash = 0.0
+            for _ck in ('totalCash', 'cashAndCashEquivalents'):
+                v = info.get(_ck)
+                if v is not None and not (isinstance(v, float) and np.isnan(v)):
+                    total_cash = float(v)
+                    break
+            net_debt = total_debt - total_cash
+            equity_value = enterprise_value - net_debt
+            
             # Get current market cap and shares outstanding
             market_cap = info.get('marketCap', 0)
             shares_outstanding = info.get('sharesOutstanding', 0)
             
             if market_cap and shares_outstanding:
                 current_price = market_cap / shares_outstanding
-                dcf_price = enterprise_value / shares_outstanding
+                dcf_price = equity_value / shares_outstanding
                 upside_downside = ((dcf_price - current_price) / current_price) * 100
             else:
                 current_price = 0
-                dcf_price = enterprise_value / 1000000000  # Assume 1B shares
+                dcf_price = equity_value / 1000000000  # Assume 1B shares if unknown
                 upside_downside = 0
             
             return {
@@ -238,8 +258,12 @@ class AdvancedFinancialAnalytics:
                 'current_price': current_price,
                 'upside_downside': upside_downside,
                 'enterprise_value': enterprise_value,
+                'equity_value': equity_value,
+                'net_debt': net_debt,
+                'ttm_fcf': ttm_fcf,
                 'wacc': wacc * 100,
-                'growth_rate': avg_growth_rate * 100,
+                'growth_rate': annual_growth_rate * 100,
+                'quarterly_growth_rate': avg_quarterly_growth * 100,
                 'terminal_growth_rate': terminal_growth_rate * 100,
                 'projected_fcf': projected_fcf,
                 'terminal_value': terminal_value,
@@ -825,6 +849,11 @@ class AdvancedFinancialAnalytics:
             st.error("**Poor Investment Case**: High downside risk or high risk profile. Consider avoiding or reducing position.")
         else:
             st.info("**Neutral Investment Case**: Mixed signals. Monitor closely before making investment decisions.")
+
+
+
+
+
 
 
 

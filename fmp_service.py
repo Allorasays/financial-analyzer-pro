@@ -1,4 +1,4 @@
-﻿"""
+"""
 Financial Modeling Prep (FMP) API Service
 Provides comprehensive financial data including income statements, balance sheets, cash flow, ratios, and key metrics
 """

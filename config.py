@@ -14,6 +14,29 @@ API_CONFIG = {
     'cache_ttl': 300  # 5 minutes
 }
 
+# Tiingo market data (used by tiingo_service / api_fallback_strategy)
+TIINGO_CONFIG = {
+    'api_key': os.getenv('TIINGO_API_KEY', ''),
+    'base_url': os.getenv('TIINGO_BASE_URL', 'https://api.tiingo.com'),
+    'timeout': int(os.getenv('TIINGO_TIMEOUT', '30')),
+    'rate_limit': int(os.getenv('TIINGO_RATE_LIMIT', '500')),
+}
+
+# FRED economic data (fred_indicators.py)
+FRED_CONFIG = {
+    'api_key': os.getenv('FRED_API_KEY', ''),
+    'base_url': os.getenv('FRED_BASE_URL', 'https://api.stlouisfed.org/fred'),
+    'timeout': int(os.getenv('FRED_TIMEOUT', '30')),
+}
+
+# NewsAPI (news_service.py)
+NEWSAPI_CONFIG = {
+    'api_key': os.getenv('NEWSAPI_KEY', ''),
+    'base_url': os.getenv('NEWSAPI_BASE_URL', 'https://newsapi.org/v2'),
+    'timeout': int(os.getenv('NEWSAPI_TIMEOUT', '30')),
+    'cache_ttl': int(os.getenv('NEWSAPI_CACHE_TTL', '300')),
+}
+
 # Financial Analysis Settings
 FINANCIAL_CONFIG = {
     'default_discount_rate': 0.10,  # 10%
