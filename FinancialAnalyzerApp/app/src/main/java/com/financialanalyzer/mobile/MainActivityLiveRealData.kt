@@ -3211,22 +3211,30 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 // Update UI on main thread
                 withContext(Dispatchers.Main) {
                     // Determine which data to use - prefer backend if it has real data
-                    val useBackendData = financialData != null && 
-                        (financialData.current_price != null || financialData.revenue != null || financialData.market_cap != null)
+                    val usedBackendData = financialData?.let { data ->
+                        val hasValidData = data.current_price != null || data.revenue != null || data.market_cap != null
+                        
+                        if (hasValidData) {
+                            Log.d("MainActivity", "Using backend financial data for $ticker")
+                            Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Backend API)", Toast.LENGTH_SHORT).show()
+                            showStockAnalysisDialogWithBackendData(ticker, stockData, data, mlPredictions, sentimentData)
+                            true
+                        } else {
+                            false
+                        }
+                    } ?: false
                     
-                    if (useBackendData) {
-                        Log.d("MainActivity", "Using backend financial data for $ticker")
-                        Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Backend API)", Toast.LENGTH_SHORT).show()
-                        showStockAnalysisDialogWithBackendData(ticker, stockData, financialData, mlPredictions, sentimentData)
-                    } else if (financialStatements != null) {
-                        Log.d("MainActivity", "Using fallback financial data for $ticker")
-                        Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Fallback)", Toast.LENGTH_SHORT).show()
-                        showStockAnalysisDialog(ticker, stockData, financialStatements, mlPredictions, sentimentData)
-                    } else {
-                        // Last resort: Show basic analysis with just stock data and ML predictions
-                        Log.w("MainActivity", "Both backend and fallback failed, showing basic analysis for $ticker")
-                        Toast.makeText(this@MainActivityLiveRealData, "⚠️ Limited data available for $ticker", Toast.LENGTH_SHORT).show()
-                        showBasicStockAnalysisDialog(ticker, stockData, mlPredictions, sentimentData)
+                    if (!usedBackendData) {
+                        if (financialStatements != null) {
+                            Log.d("MainActivity", "Using fallback financial data for $ticker")
+                            Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Fallback)", Toast.LENGTH_SHORT).show()
+                            showStockAnalysisDialog(ticker, stockData, financialStatements, mlPredictions, sentimentData)
+                        } else {
+                            // Last resort: Show basic analysis with just stock data and ML predictions
+                            Log.w("MainActivity", "Both backend and fallback failed, showing basic analysis for $ticker")
+                            Toast.makeText(this@MainActivityLiveRealData, "⚠️ Limited data available for $ticker", Toast.LENGTH_SHORT).show()
+                            showBasicStockAnalysisDialog(ticker, stockData, mlPredictions, sentimentData)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -4419,13 +4427,13 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 prefs.edit().putString("fmp_api_key", apiKey).apply()
                 
                 // Fetch comprehensive financial data from multiple FMP endpoints
-                val metricsUrl = "https://financialmodelingprep.com/api/v3/key-metrics/$ticker?apikey=$apiKey&limit=1"
-                val ratiosUrl = "https://financialmodelingprep.com/api/v3/ratios/$ticker?apikey=$apiKey&limit=1"
-                val incomeUrl = "https://financialmodelingprep.com/api/v3/income-statement/$ticker?apikey=$apiKey&limit=1"
-                val balanceUrl = "https://financialmodelingprep.com/api/v3/balance-sheet-statement/$ticker?apikey=$apiKey&limit=1"
-                val cashFlowUrl = "https://financialmodelingprep.com/api/v3/cash-flow-statement/$ticker?apikey=$apiKey&limit=1"
-                val profileUrl = "https://financialmodelingprep.com/api/v3/profile/$ticker?apikey=$apiKey"
-                val quoteUrl = "https://financialmodelingprep.com/api/v3/quote/$ticker?apikey=$apiKey"
+                val metricsUrl = "https://financialmodelingprep.com/stable/key-metrics?symbol=$ticker&apikey=$apiKey&limit=1"
+                val ratiosUrl = "https://financialmodelingprep.com/stable/ratios?symbol=$ticker&apikey=$apiKey&limit=1"
+                val incomeUrl = "https://financialmodelingprep.com/stable/income-statement?symbol=$ticker&apikey=$apiKey&limit=1"
+                val balanceUrl = "https://financialmodelingprep.com/stable/balance-sheet-statement?symbol=$ticker&apikey=$apiKey&limit=1"
+                val cashFlowUrl = "https://financialmodelingprep.com/stable/cash-flow-statement?symbol=$ticker&apikey=$apiKey&limit=1"
+                val profileUrl = "https://financialmodelingprep.com/stable/profile?symbol=$ticker&apikey=$apiKey"
+                val quoteUrl = "https://financialmodelingprep.com/stable/quote?symbol=$ticker&apikey=$apiKey"
                 
                 // Fetch all data in parallel for speed
                 val metricsData = fetchJsonFromUrl(metricsUrl)
@@ -5858,9 +5866,9 @@ class MainActivityLiveRealData : AppCompatActivity() {
                     ?: "R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve"
                 
                 // Fetch quarterly financial trends (last 8 quarters for trend analysis)
-                val incomeUrl = "https://financialmodelingprep.com/api/v3/income-statement/$ticker?period=quarter&limit=8&apikey=$apiKey"
-                val ratiosUrl = "https://financialmodelingprep.com/api/v3/ratios/$ticker?period=quarter&limit=8&apikey=$apiKey"
-                val growthUrl = "https://financialmodelingprep.com/api/v3/financial-growth/$ticker?period=quarter&limit=8&apikey=$apiKey"
+                val incomeUrl = "https://financialmodelingprep.com/stable/income-statement?symbol=$ticker&period=quarter&limit=8&apikey=$apiKey"
+                val ratiosUrl = "https://financialmodelingprep.com/stable/ratios?symbol=$ticker&period=quarter&limit=8&apikey=$apiKey"
+                val growthUrl = "https://financialmodelingprep.com/stable/financial-growth?symbol=$ticker&period=quarter&limit=8&apikey=$apiKey"
                 
                 val incomeData = fetchJsonFromUrl(incomeUrl)
                 val ratiosData = fetchJsonFromUrl(ratiosUrl)
@@ -6584,7 +6592,7 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 Log.d("FMP-Test", "🔑 Using API key: ${apiKey.take(10)}...")
                 
                 // Test basic API call
-                val testUrl = "https://financialmodelingprep.com/api/v3/income-statement/$testTicker?period=quarter&limit=1&apikey=$apiKey"
+                val testUrl = "https://financialmodelingprep.com/stable/income-statement?symbol=$testTicker&period=quarter&limit=1&apikey=$apiKey"
                 Log.d("FMP-Test", "🌐 Testing URL: $testUrl")
                 
                 val response = fetchJsonFromUrl(testUrl)

@@ -17,12 +17,13 @@ class FMPService:
     def __init__(self):
         # Get API key from environment variable or use default
         self.api_key = os.getenv('FMP_API_KEY', 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve')
-        self.base_url = "https://financialmodelingprep.com/api/v3"
+        self.base_url = "https://financialmodelingprep.com/stable"
         self.enabled = bool(self.api_key)
     
     def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """Make API request to FMP"""
+        """Make API request to FMP stable API (symbol via query param, not path)."""
         if not self.enabled:
+            logger.warning(f"FMP service not enabled (no API key)")
             return None
         
         try:
@@ -31,50 +32,90 @@ class FMPService:
                 params = {}
             params['apikey'] = self.api_key
             
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, timeout=15)
             response.raise_for_status()
             
             data = response.json()
+            
+            # Check for API errors in response
+            if isinstance(data, dict) and 'Error Message' in data:
+                logger.error(f"FMP API error for {endpoint}: {data.get('Error Message')}")
+                return None
+            
+            # Check for rate limiting or invalid API key
+            if isinstance(data, dict) and ('Note' in data or 'message' in data):
+                error_msg = data.get('Note') or data.get('message', '')
+                if 'limit' in error_msg.lower() or 'subscription' in error_msg.lower():
+                    logger.warning(f"FMP API limit/subscription issue for {endpoint}: {error_msg}")
+                else:
+                    logger.error(f"FMP API message for {endpoint}: {error_msg}")
+                return None
+            
             return data if data else None
             
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                logger.error(f"FMP API authentication failed - check API key for {endpoint}")
+            elif e.response.status_code == 403:
+                logger.error(f"FMP API access forbidden - check subscription for {endpoint}")
+            elif e.response.status_code == 429:
+                logger.warning(f"FMP API rate limit exceeded for {endpoint}")
+            else:
+                logger.error(f"FMP API HTTP error for {endpoint}: {e.response.status_code} - {e}")
+            return None
         except Exception as e:
             logger.error(f"FMP API request failed for {endpoint}: {e}")
             return None
     
     def get_key_metrics(self, ticker: str) -> Optional[Dict]:
         """Get key financial metrics"""
-        data = self._make_request(f"key-metrics/{ticker}", {'limit': 1})
+        data = self._make_request("key-metrics", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_financial_ratios(self, ticker: str) -> Optional[Dict]:
         """Get financial ratios"""
-        data = self._make_request(f"ratios/{ticker}", {'limit': 1})
+        data = self._make_request("ratios", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_income_statement(self, ticker: str) -> Optional[Dict]:
         """Get income statement"""
-        data = self._make_request(f"income-statement/{ticker}", {'limit': 1})
+        data = self._make_request("income-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_balance_sheet(self, ticker: str) -> Optional[Dict]:
         """Get balance sheet"""
-        data = self._make_request(f"balance-sheet-statement/{ticker}", {'limit': 1})
+        data = self._make_request("balance-sheet-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_cash_flow(self, ticker: str) -> Optional[Dict]:
         """Get cash flow statement"""
-        data = self._make_request(f"cash-flow-statement/{ticker}", {'limit': 1})
+        data = self._make_request("cash-flow-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_company_profile(self, ticker: str) -> Optional[Dict]:
         """Get company profile"""
-        data = self._make_request(f"profile/{ticker}")
+        data = self._make_request("profile", {'symbol': ticker})
         return data[0] if data and len(data) > 0 else None
     
     def get_quote(self, ticker: str) -> Optional[Dict]:
         """Get real-time quote"""
-        data = self._make_request(f"quote/{ticker}")
+        data = self._make_request("quote", {'symbol': ticker})
         return data[0] if data and len(data) > 0 else None
+
+    def _normalize_field_names(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Map FMP field names to backend/Android FinancialDataResponse keys."""
+        aliases = {
+            'net_margin': 'profit_margin',
+            'cash_and_equivalents': 'total_cash',
+            'year_low': '52_week_low',
+            'year_high': '52_week_high',
+            'avg_volume': 'average_volume',
+            'price_change_percent': 'change_percent',
+        }
+        for src, dest in aliases.items():
+            if financial_data.get(src) is not None and financial_data.get(dest) is None:
+                financial_data[dest] = financial_data[src]
+        return financial_data
     
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
         """Get comprehensive financial data from multiple FMP endpoints"""
@@ -146,6 +187,7 @@ class FMPService:
             # From Ratios
             if ratios:
                 financial_data.update({
+                    'pe_ratio': ratios.get('priceToEarningsRatio') or financial_data.get('pe_ratio'),
                     'current_ratio': ratios.get('currentRatio'),
                     'quick_ratio': ratios.get('quickRatio'),
                     'debt_to_equity': ratios.get('debtEquityRatio'),
@@ -177,25 +219,41 @@ class FMPService:
                 financial_data.update({
                     'current_price': quote.get('price'),
                     'price_change': quote.get('change'),
-                    'price_change_percent': quote.get('changesPercentage'),
+                    'price_change_percent': quote.get('changePercentage') or quote.get('changesPercentage'),
                     'day_low': quote.get('dayLow'),
                     'day_high': quote.get('dayHigh'),
                     'year_low': quote.get('yearLow'),
                     'year_high': quote.get('yearHigh'),
                     'volume': quote.get('volume'),
-                    'avg_volume': quote.get('avgVolume'),
+                    'avg_volume': quote.get('avgVolume') or quote.get('averageVolume'),
                     'market_cap': quote.get('marketCap') or financial_data.get('market_cap'),
+                    'previous_close': quote.get('previousClose'),
+                    'open': quote.get('open'),
                 })
+
+            if profile:
+                financial_data.setdefault('average_volume', profile.get('averageVolume'))
+                financial_data.setdefault('beta', profile.get('beta'))
             
+            financial_data = self._normalize_field_names(financial_data)
             financial_data['data_source'] = 'FMP'
             financial_data['timestamp'] = datetime.now().isoformat()
+            
+            # Log what we got
+            data_count = len([v for v in financial_data.values() if v is not None and v != ''])
+            logger.info(f"FMP comprehensive data for {ticker}: {data_count} non-null fields")
+            
+            # If we have very little data, log a warning
+            if data_count < 10:
+                logger.warning(f"FMP returned limited data for {ticker}: only {data_count} fields")
             
             return financial_data
             
         except Exception as e:
-            logger.error(f"Error fetching comprehensive FMP data for {ticker}: {e}")
+            logger.error(f"Error fetching comprehensive FMP data for {ticker}: {e}", exc_info=True)
             return {}
 
 # Global instance
 fmp_service = FMPService()
+
 
