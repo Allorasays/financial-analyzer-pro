@@ -192,7 +192,11 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 Toast.makeText(this, "Some features may not work properly", Toast.LENGTH_SHORT).show()
             }
             
-            Toast.makeText(this, "🚀 MONETA FINANCIAL ANALYZER - Real Market Data! ✅", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                this,
+                "Personal use only — configure your own API keys. Not for public distribution.",
+                Toast.LENGTH_LONG
+            ).show()
             
             // Handle app shortcuts (deep links) AFTER layout is created
             handleShortcutIntent(intent)
@@ -4413,19 +4417,24 @@ class MainActivityLiveRealData : AppCompatActivity() {
         }
     }
     
+    private fun getPersonalFmpApiKey(): String? = getPersonalApiKey("fmp_api_key")
+
+    private fun getPersonalApiKey(prefKey: String): String? {
+        val key = getSharedPreferences("api_keys", MODE_PRIVATE).getString(prefKey, null)?.trim()
+        return if (key.isNullOrEmpty()) null else key
+    }
+
     private suspend fun fetchFromFinancialModelingPrep(ticker: String, stockData: StockAnalysisData): FinancialStatements {
         return withContext(Dispatchers.IO) {
             try {
                 Log.d("FMP", "🔍 Fetching comprehensive financial data for $ticker from Financial Modeling Prep...")
                 
-                // Financial Modeling Prep API Key - Use the provided key directly
-                val apiKey = "R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve"
-                Log.d("FMP", "🔑 Using FMP API key: ${apiKey.take(10)}...")
-                
-                // Save the API key for future use
-                val prefs = getSharedPreferences("api_keys", MODE_PRIVATE)
-                prefs.edit().putString("fmp_api_key", apiKey).apply()
-                
+                val apiKey = getPersonalFmpApiKey()
+                    ?: throw Exception(
+                        "FMP API key not configured. Personal use only: add your licensed key in Settings " +
+                        "or rely on the backend /api/financials endpoint."
+                    )
+                Log.d("FMP", "🔑 Using personal FMP API key: ${apiKey.take(6)}...")
                 // Fetch comprehensive financial data from multiple FMP endpoints
                 val metricsUrl = "https://financialmodelingprep.com/stable/key-metrics?symbol=$ticker&apikey=$apiKey&limit=1"
                 val ratiosUrl = "https://financialmodelingprep.com/stable/ratios?symbol=$ticker&apikey=$apiKey&limit=1"
@@ -4564,9 +4573,8 @@ class MainActivityLiveRealData : AppCompatActivity() {
             try {
                 Log.d("AlphaVantage", "📊 Fetching financial data from Alpha Vantage for $ticker...")
                 
-                // Alpha Vantage API Key (free tier) - REAL KEY PROVIDED
-                val apiKey = "C04TV0QS7GVJF0RU" // Real API key from user
-                
+                val apiKey = getPersonalApiKey("alpha_vantage_api_key")
+                    ?: throw Exception("Alpha Vantage API key not configured for personal use")
                 // Fetch key financial metrics
                 val overviewUrl = "https://www.alphavantage.co/query?function=OVERVIEW&symbol=$ticker&apikey=$apiKey"
                 val incomeUrl = "https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol=$ticker&apikey=$apiKey"
@@ -4741,8 +4749,8 @@ class MainActivityLiveRealData : AppCompatActivity() {
             try {
                 Log.d("PolygonIO", "📊 Fetching financial data from Polygon.io for $ticker...")
                 
-                // Polygon.io API - REAL KEY PROVIDED
-                val apiKey = "gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm" // Real API key from user
+                val apiKey = getPersonalApiKey("polygon_api_key")
+                    ?: throw Exception("Polygon API key not configured for personal use")
                 val tickerDetailsUrl = "https://api.polygon.io/v3/reference/tickers/$ticker?apikey=$apiKey"
                 val financialsUrl = "https://api.polygon.io/vX/reference/financials?ticker=$ticker&apikey=$apiKey"
                 
@@ -5861,10 +5869,11 @@ class MainActivityLiveRealData : AppCompatActivity() {
             try {
                 Log.d("ML-Fundamental", "Fetching fundamental data for ML enhancement: $ticker")
                 
-                val prefs = getSharedPreferences("api_keys", MODE_PRIVATE)
-                val apiKey = prefs.getString("fmp_api_key", "R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve") 
-                    ?: "R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve"
-                
+                val apiKey = getPersonalFmpApiKey()
+                if (apiKey == null) {
+                    Log.w("ML-Fundamental", "Skipping FMP fundamental fetch — no personal API key configured")
+                    throw Exception("FMP API key not configured for personal use")
+                }
                 // Fetch quarterly financial trends (last 8 quarters for trend analysis)
                 val incomeUrl = "https://financialmodelingprep.com/stable/income-statement?symbol=$ticker&period=quarter&limit=8&apikey=$apiKey"
                 val ratiosUrl = "https://financialmodelingprep.com/stable/ratios?symbol=$ticker&period=quarter&limit=8&apikey=$apiKey"
@@ -6578,15 +6587,16 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 
                 // Test with a simple stock
                 val testTicker = "AAPL"
-                val prefs = getSharedPreferences("api_keys", MODE_PRIVATE)
-                var apiKey = prefs.getString("fmp_api_key", "demo") ?: "demo"
-                
-                // Use the provided API key if demo is still set
-                if (apiKey == "demo") {
-                    apiKey = "R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve"
-                    // Save it for future use
-                    prefs.edit().putString("fmp_api_key", apiKey).apply()
-                    Log.d("FMP-Test", "Updated API key in preferences")
+                val apiKey = getPersonalFmpApiKey()
+                if (apiKey == null) {
+                    withContext(Dispatchers.Main) {
+                        Toast.makeText(
+                            this@MainActivityLiveRealData,
+                            "Add your personal FMP API key in Settings before testing.",
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                    return@launch
                 }
                 
                 Log.d("FMP-Test", "🔑 Using API key: ${apiKey.take(10)}...")
