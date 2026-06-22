@@ -1,5 +1,5 @@
 services:
-  # Backend API (FastAPI via uvicorn)
+  # Backend API (FastAPI via uvicorn) — PERSONAL USE: private deployment only
   - type: web
     name: moneta-backend-api
     env: python
@@ -25,6 +25,10 @@ services:
         sync: false
       - key: FMP_API_KEY
         sync: false
+      - key: PERSONAL_USE_ONLY
+        value: "true"
+      - key: FINANCIALS_CACHE_TTL_SECONDS
+        value: "1800"
 
   # Web Dashboard (Streamlit)
   - type: web

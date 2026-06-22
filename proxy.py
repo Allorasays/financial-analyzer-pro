@@ -43,6 +43,8 @@ from divergence_indicators import add_divergence_features
 from prediction_tracker import prediction_tracker
 from prediction_validator import prediction_validator
 from fmp_service import fmp_service
+from comprehensive_financial_aggregator import comprehensive_financial_aggregator
+from config import PERSONAL_USE_CONFIG
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -3001,191 +3003,140 @@ async def get_stock_data(ticker: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching stock data: {str(e)}")
 
+# In-memory cache for personal-use deployments (reduces third-party API calls)
+_financials_cache: Dict[str, Dict[str, Any]] = {}
+_financials_cache_lock = threading.Lock()
+
+
+def _count_financial_fields(data: Dict[str, Any]) -> int:
+    skip = {'data_source', 'data_sources', 'timestamp', 'ticker', 'data_coverage',
+            'usage_notice', 'personal_use_only', 'cached', 'cached_at'}
+    return len([v for k, v in data.items() if k not in skip and v is not None])
+
+
+def _attach_personal_use_metadata(payload: Dict[str, Any], cached: bool = False,
+                                  cached_at: Optional[str] = None) -> Dict[str, Any]:
+    payload['personal_use_only'] = PERSONAL_USE_CONFIG['enabled']
+    payload['usage_notice'] = PERSONAL_USE_CONFIG['notice']
+    payload['cached'] = cached
+    if cached_at:
+        payload['cached_at'] = cached_at
+    return payload
+
+
+def format_sentiment_for_android(ticker: str, raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Map backend sentiment dict to Android SentimentData JSON shape."""
+    score = float(raw.get('sentiment_score') or 0.0)
+    overall = str(raw.get('overall_sentiment') or 'neutral').lower()
+    confidence = float(raw.get('confidence_score') or min(1.0, max(0.0, abs(score))))
+    if confidence > 1.0:
+        confidence = confidence / 100.0
+
+    news_block = raw.get('news_sentiment') if isinstance(raw.get('news_sentiment'), dict) else {}
+    news_agg = news_block.get('aggregate_sentiment') if isinstance(news_block.get('aggregate_sentiment'), dict) else {}
+    article_count = int(news_agg.get('total_items') or 0)
+
+    def platform_block(platform: str, volume_scale: float) -> Dict[str, Any]:
+        return {
+            "platform": platform,
+            "sentiment_score": score,
+            "sentiment_label": overall,
+            "volume": max(0, int(article_count * volume_scale)),
+            "confidence": confidence,
+            "timestamp": datetime.now().isoformat(),
+        }
+
+    bullish = 1 if overall == 'positive' else 0
+    bearish = 1 if overall == 'negative' else 0
+    neutral = 1 if overall == 'neutral' else 0
+    total_sources = max(1, bullish + bearish + neutral)
+
+    trend = 'up' if score > 0.05 else 'down' if score < -0.05 else 'stable'
+
+    return {
+        "overall_sentiment": overall,
+        "sentiment_score": score,
+        "confidence": min(1.0, max(0.0, confidence)),
+        "trend": trend,
+        "volume": article_count or total_sources,
+        "sources": {
+            "twitter": platform_block("twitter", 0.5),
+            "reddit": platform_block("reddit", 0.7),
+            "news": platform_block("news", 1.0),
+        },
+        "summary": {
+            "bullish_sources": bullish,
+            "bearish_sources": bearish,
+            "neutral_sources": neutral,
+            "total_sources": total_sources,
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+
+
 @app.get("/api/financials/{ticker}")
 async def get_financial_metrics(ticker: str):
-    """Get comprehensive financial metrics - all data points for real stock analysis
-    Uses FMP (Financial Modeling Prep) API first, then falls back to yfinance for maximum data coverage
-    """
+    """Comprehensive financial metrics for personal use. Uses multi-source aggregator with cache."""
+    symbol = ticker.upper()
+    ttl = PERSONAL_USE_CONFIG['financials_cache_ttl']
+    now = time.time()
+
+    with _financials_cache_lock:
+        cached_entry = _financials_cache.get(symbol)
+        if cached_entry and (now - cached_entry['ts']) < ttl:
+            payload = dict(cached_entry['data'])
+            return _attach_personal_use_metadata(
+                payload,
+                cached=True,
+                cached_at=datetime.fromtimestamp(cached_entry['ts']).isoformat(),
+            )
+
     try:
-        financial_data = {}
-        
-        # PRIORITY 1: Try FMP API first (best comprehensive data)
-        try:
-            fmp_data = fmp_service.get_comprehensive_financial_data(ticker)
-            # Check if we have meaningful financial data (more than just metadata)
-            if fmp_data and isinstance(fmp_data, dict):
-                # Count actual financial data fields (exclude metadata)
-                data_fields = [k for k in fmp_data.keys() if k not in ['data_source', 'timestamp', 'ticker']]
-                financial_values = [v for k, v in fmp_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None]
-                
-                if len(financial_values) > 5:  # Need at least 5 actual data points
-                    print(f"[FMP] Successfully fetched comprehensive data for {ticker}: {len(financial_values)} fields")
-                    financial_data = fmp_data
-                    financial_data['ticker'] = ticker.upper()
-                    return financial_data
-                else:
-                    print(f"[FMP] Insufficient data for {ticker}: only {len(financial_values)} values found")
-        except Exception as e:
-            print(f"[FMP] Failed for {ticker}: {e}")
-            import traceback
-            traceback.print_exc()
-        
-        # PRIORITY 2: Fallback to yfinance (good coverage but some gaps)
-        print(f"[yfinance] Using fallback for {ticker}")
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
-        # Helper function to safely get values - preserve 0 as valid value by default
-        def safe_get(key, default=None, allow_zero=True):
-            """Get value from info dict, preserving 0 and False as valid values"""
-            value = info.get(key, default)
-            # Only return None for truly missing/invalid values
-            if value is None or value == '':
-                return None
-            # Handle NaN and infinity values
-            try:
-                if isinstance(value, float):
-                    import math
-                    if math.isnan(value) or math.isinf(value):
-                        return None
-            except:
-                pass
-            # For most financial metrics, 0 is a valid value (debt can be 0, growth can be 0%, etc.)
-            # Only filter out 0 if explicitly requested
-            if not allow_zero and value == 0:
-                return None
-            return value
-        
-        # Comprehensive financial data from yfinance
-        financial_data = {
-            # Company Information
-            "ticker": ticker.upper(),
-            "company_name": info.get('longName') or info.get('shortName') or None,
-            "industry": info.get('industry') or None,
-            "sector": info.get('sector') or None,
-            "website": info.get('website') or None,
-            "description": info.get('longBusinessSummary') or None,
-            
-            # Market Data
-            "current_price": safe_get('currentPrice') or safe_get('regularMarketPrice'),
-            "previous_close": safe_get('previousClose'),
-            "market_cap": safe_get('marketCap'),
-            "enterprise_value": safe_get('enterpriseValue'),
-            "shares_outstanding": safe_get('sharesOutstanding'),
-            "float_shares": safe_get('floatShares'),
-            "shares_short": safe_get('sharesShort'),
-            "short_ratio": safe_get('shortRatio'),
-            "52_week_high": safe_get('fiftyTwoWeekHigh'),
-            "52_week_low": safe_get('fiftyTwoWeekLow'),
-            
-            # Valuation Ratios
-            "pe_ratio": safe_get('trailingPE'),
-            "forward_pe": safe_get('forwardPE'),
-            "peg_ratio": safe_get('pegRatio'),
-            "price_to_book": safe_get('priceToBook'),
-            "price_to_sales": safe_get('priceToSalesTrailing12Months'),
-            "enterprise_value_to_revenue": safe_get('enterpriseToRevenue'),
-            "enterprise_value_to_ebitda": safe_get('enterpriseToEbitda'),
-            "ev_to_revenue": safe_get('enterpriseToRevenue'),
-            "ev_to_ebitda": safe_get('enterpriseToEbitda'),
-            
-            # Profitability Metrics
-            "revenue": safe_get('totalRevenue'),
-            "revenue_per_share": safe_get('revenuePerShare'),
-            "revenue_growth": safe_get('revenueGrowth'),
-            "net_income": safe_get('netIncomeToCommon') or safe_get('netIncome'),
-            "net_income_common": safe_get('netIncomeToCommon'),
-            "earnings_per_share": safe_get('trailingEps') or safe_get('epsTrailingTwelveMonths'),
-            "forward_eps": safe_get('forwardEps'),
-            "earnings_growth": safe_get('earningsGrowth'),
-            "earnings_quarterly_growth": safe_get('earningsQuarterlyGrowth'),
-            
-            # Margins
-            "gross_margin": safe_get('grossMargins'),
-            "operating_margin": safe_get('operatingMargins'),
-            "profit_margin": safe_get('profitMargins'),
-            "ebitda_margin": safe_get('ebitdaMargins') if safe_get('ebitdaMargins') else None,
-            
-            # Cash Flow
-            "ebitda": safe_get('ebitda'),
-            "free_cash_flow": safe_get('freeCashflow'),
-            "operating_cash_flow": safe_get('operatingCashflow'),
-            "cash_per_share": safe_get('totalCashPerShare'),
-            
-            # Returns
-            "return_on_equity": safe_get('returnOnEquity'),
-            "return_on_assets": safe_get('returnOnAssets'),
-            "return_on_invested_capital": safe_get('returnOnInvestedCapital'),
-            
-            # Debt & Liquidity
-            "debt_to_equity": safe_get('debtToEquity'),
-            "debt_to_assets": safe_get('debtToAssets'),
-            "current_ratio": safe_get('currentRatio'),
-            "quick_ratio": safe_get('quickRatio'),
-            "cash_ratio": safe_get('cashRatio'),
-            "total_debt": safe_get('totalDebt'),
-            "total_cash": safe_get('totalCash'),
-            "total_cash_per_share": safe_get('totalCashPerShare'),
-            
-            # Dividends
-            "dividend_yield": safe_get('dividendYield'),
-            "dividend_rate": safe_get('dividendRate'),
-            "dividend_per_share": safe_get('trailingAnnualDividendRate'),
-            "payout_ratio": safe_get('payoutRatio'),
-            "ex_dividend_date": info.get('exDividendDate'),
-            "dividend_date": info.get('dividendDate'),
-            
-            # Growth Metrics
-            "revenue_growth": safe_get('revenueGrowth'),
-            "earnings_growth": safe_get('earningsGrowth'),
-            "earnings_quarterly_growth": safe_get('earningsQuarterlyGrowth'),
-            "revenue_per_share_growth": safe_get('revenuePerShare'),
-            
-            # Trading Metrics
-            "beta": safe_get('beta'),
-            "volume": safe_get('volume', allow_zero=True),
-            "average_volume": safe_get('averageVolume', allow_zero=True),
-            "average_volume_10days": safe_get('averageVolume10days', allow_zero=True),
-            "bid": safe_get('bid'),
-            "ask": safe_get('ask'),
-            "bid_size": safe_get('bidSize'),
-            "ask_size": safe_get('askSize'),
-            "day_low": safe_get('dayLow'),
-            "day_high": safe_get('dayHigh'),
-            "open": safe_get('open'),
-            
-            # Analyst Data
-            "target_high_price": safe_get('targetHighPrice'),
-            "target_low_price": safe_get('targetLowPrice'),
-            "target_mean_price": safe_get('targetMeanPrice'),
-            "target_median_price": safe_get('targetMedianPrice'),
-            "recommendation_mean": info.get('recommendationMean'),
-            "recommendation_key": info.get('recommendationKey'),
-            "number_of_analyst_opinions": safe_get('numberOfAnalystOpinions'),
-            
-            # Additional Metrics
-            "book_value": safe_get('bookValue'),
-            "price_to_book": safe_get('priceToBook'),
-            "price_to_sales_trailing_12months": safe_get('priceToSalesTrailing12Months'),
-            "enterprise_value": safe_get('enterpriseValue'),
-            "enterprise_value_to_revenue": safe_get('enterpriseToRevenue'),
-            "enterprise_value_to_ebitda": safe_get('enterpriseToEbitda'),
-            "held_percent_insiders": safe_get('heldPercentInsiders'),
-            "held_percent_institutions": safe_get('heldPercentInstitutions'),
-            
-            # Timestamps
-            "timestamp": datetime.now().isoformat(),
-            "data_source": "yfinance"
-        }
-        
-        financial_data['ticker'] = ticker.upper()
-        
-        # Remove None values to reduce payload size (frontend can handle missing keys)
-        # But keep structure for easier frontend parsing
+        financial_data = comprehensive_financial_aggregator.get_comprehensive_financial_data(symbol)
+        non_null_count = _count_financial_fields(financial_data)
+
+        if non_null_count < 3:
+            with _financials_cache_lock:
+                stale = _financials_cache.get(symbol)
+            if stale:
+                payload = dict(stale['data'])
+                return _attach_personal_use_metadata(
+                    payload,
+                    cached=True,
+                    cached_at=datetime.fromtimestamp(stale['ts']).isoformat(),
+                )
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Insufficient financial data. For personal use, set your own API keys "
+                    "(FMP_API_KEY, ALPHAVANTAGE_API_KEY) in .env and ensure provider terms allow your use."
+                ),
+            )
+
+        financial_data = _attach_personal_use_metadata(financial_data, cached=False)
+        with _financials_cache_lock:
+            _financials_cache[symbol] = {'ts': now, 'data': dict(financial_data)}
+
+        print(f"[Result] /api/financials/{symbol}: {non_null_count} fields, sources={financial_data.get('data_source')}")
         return financial_data
-        
+
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching financial metrics: {str(e)}")
+        print(f"[Error] /api/financials/{symbol}: {e}")
+        with _financials_cache_lock:
+            stale = _financials_cache.get(symbol)
+        if stale:
+            payload = dict(stale['data'])
+            return _attach_personal_use_metadata(
+                payload,
+                cached=True,
+                cached_at=datetime.fromtimestamp(stale['ts']).isoformat(),
+            )
+        raise HTTPException(
+            status_code=503,
+            detail=f"Financial data temporarily unavailable: {str(e)}",
+        )
 
 @app.get("/api/peers/{ticker}")
 async def get_peer_comparison(ticker: str):
@@ -3272,14 +3223,17 @@ async def get_sentiment_analysis_endpoint(ticker: str):
         
         # Get sentiment analysis
         sentiment_data = get_sentiment_analysis(ticker.upper())
+        android_sentiment = format_sentiment_for_android(ticker.upper(), sentiment_data)
         
-        print(f"[DEBUG] Sentiment Analysis result: {sentiment_data['overall_sentiment']}")
+        print(f"[DEBUG] Sentiment Analysis result: {android_sentiment['overall_sentiment']}")
         
         return JSONResponse(content={
             "success": True,
             "ticker": ticker.upper(),
-            "data": sentiment_data,
-            "timestamp": datetime.now().isoformat()
+            "data": android_sentiment,
+            "timestamp": datetime.now().isoformat(),
+            "personal_use_only": PERSONAL_USE_CONFIG['enabled'],
+            "usage_notice": PERSONAL_USE_CONFIG['notice'],
         })
         
     except Exception as e:

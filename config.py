@@ -6,12 +6,23 @@ Contains constants, settings, and configuration options
 import os
 from typing import Dict, List
 
+# Personal use only — not licensed for public/multi-user deployment until
+# third-party data provider terms are obtained (FMP, NewsAPI, etc.).
+PERSONAL_USE_CONFIG = {
+    'enabled': os.getenv('PERSONAL_USE_ONLY', 'true').lower() in ('1', 'true', 'yes'),
+    'notice': (
+        'Personal use only. Configure your own API keys in .env. '
+        'Public distribution requires licenses from data providers.'
+    ),
+    'financials_cache_ttl': int(os.getenv('FINANCIALS_CACHE_TTL_SECONDS', '1800')),
+}
+
 # API Configuration
 API_CONFIG = {
     'base_url': os.getenv('API_BASE_URL', 'http://localhost:8000'),
     'timeout': 30,
     'retry_attempts': 3,
-    'cache_ttl': 300  # 5 minutes
+    'cache_ttl': PERSONAL_USE_CONFIG['financials_cache_ttl'],
 }
 
 # Tiingo market data (used by tiingo_service / api_fallback_strategy)

@@ -15,8 +15,8 @@ class FMPService:
     """Service for fetching data from Financial Modeling Prep API"""
     
     def __init__(self):
-        # Get API key from environment variable or use default
-        self.api_key = os.getenv('FMP_API_KEY', 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve')
+        # Personal use: set FMP_API_KEY in your local .env only (no bundled keys).
+        self.api_key = os.getenv('FMP_API_KEY', '').strip()
         self.base_url = "https://financialmodelingprep.com/stable"
         self.enabled = bool(self.api_key)
     
