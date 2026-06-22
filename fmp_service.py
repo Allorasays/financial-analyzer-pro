@@ -1,4 +1,4 @@
-"""
+﻿"""
 Financial Modeling Prep (FMP) API Service
 Provides comprehensive financial data including income statements, balance sheets, cash flow, ratios, and key metrics
 """
@@ -17,11 +17,11 @@ class FMPService:
     def __init__(self):
         # Get API key from environment variable or use default
         self.api_key = os.getenv('FMP_API_KEY', 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve')
-        self.base_url = "https://financialmodelingprep.com/api/v3"
+        self.base_url = "https://financialmodelingprep.com/stable"
         self.enabled = bool(self.api_key)
     
     def _make_request(self, endpoint: str, params: Dict = None) -> Optional[Dict]:
-        """Make API request to FMP"""
+        """Make API request to FMP stable API (symbol via query param, not path)."""
         if not self.enabled:
             logger.warning(f"FMP service not enabled (no API key)")
             return None
@@ -69,38 +69,53 @@ class FMPService:
     
     def get_key_metrics(self, ticker: str) -> Optional[Dict]:
         """Get key financial metrics"""
-        data = self._make_request(f"key-metrics/{ticker}", {'limit': 1})
+        data = self._make_request("key-metrics", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_financial_ratios(self, ticker: str) -> Optional[Dict]:
         """Get financial ratios"""
-        data = self._make_request(f"ratios/{ticker}", {'limit': 1})
+        data = self._make_request("ratios", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_income_statement(self, ticker: str) -> Optional[Dict]:
         """Get income statement"""
-        data = self._make_request(f"income-statement/{ticker}", {'limit': 1})
+        data = self._make_request("income-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_balance_sheet(self, ticker: str) -> Optional[Dict]:
         """Get balance sheet"""
-        data = self._make_request(f"balance-sheet-statement/{ticker}", {'limit': 1})
+        data = self._make_request("balance-sheet-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_cash_flow(self, ticker: str) -> Optional[Dict]:
         """Get cash flow statement"""
-        data = self._make_request(f"cash-flow-statement/{ticker}", {'limit': 1})
+        data = self._make_request("cash-flow-statement", {'symbol': ticker, 'limit': 1})
         return data[0] if data and len(data) > 0 else None
     
     def get_company_profile(self, ticker: str) -> Optional[Dict]:
         """Get company profile"""
-        data = self._make_request(f"profile/{ticker}")
+        data = self._make_request("profile", {'symbol': ticker})
         return data[0] if data and len(data) > 0 else None
     
     def get_quote(self, ticker: str) -> Optional[Dict]:
         """Get real-time quote"""
-        data = self._make_request(f"quote/{ticker}")
+        data = self._make_request("quote", {'symbol': ticker})
         return data[0] if data and len(data) > 0 else None
+
+    def _normalize_field_names(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Map FMP field names to backend/Android FinancialDataResponse keys."""
+        aliases = {
+            'net_margin': 'profit_margin',
+            'cash_and_equivalents': 'total_cash',
+            'year_low': '52_week_low',
+            'year_high': '52_week_high',
+            'avg_volume': 'average_volume',
+            'price_change_percent': 'change_percent',
+        }
+        for src, dest in aliases.items():
+            if financial_data.get(src) is not None and financial_data.get(dest) is None:
+                financial_data[dest] = financial_data[src]
+        return financial_data
     
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
         """Get comprehensive financial data from multiple FMP endpoints"""
@@ -172,6 +187,7 @@ class FMPService:
             # From Ratios
             if ratios:
                 financial_data.update({
+                    'pe_ratio': ratios.get('priceToEarningsRatio') or financial_data.get('pe_ratio'),
                     'current_ratio': ratios.get('currentRatio'),
                     'quick_ratio': ratios.get('quickRatio'),
                     'debt_to_equity': ratios.get('debtEquityRatio'),
@@ -203,16 +219,23 @@ class FMPService:
                 financial_data.update({
                     'current_price': quote.get('price'),
                     'price_change': quote.get('change'),
-                    'price_change_percent': quote.get('changesPercentage'),
+                    'price_change_percent': quote.get('changePercentage') or quote.get('changesPercentage'),
                     'day_low': quote.get('dayLow'),
                     'day_high': quote.get('dayHigh'),
                     'year_low': quote.get('yearLow'),
                     'year_high': quote.get('yearHigh'),
                     'volume': quote.get('volume'),
-                    'avg_volume': quote.get('avgVolume'),
+                    'avg_volume': quote.get('avgVolume') or quote.get('averageVolume'),
                     'market_cap': quote.get('marketCap') or financial_data.get('market_cap'),
+                    'previous_close': quote.get('previousClose'),
+                    'open': quote.get('open'),
                 })
+
+            if profile:
+                financial_data.setdefault('average_volume', profile.get('averageVolume'))
+                financial_data.setdefault('beta', profile.get('beta'))
             
+            financial_data = self._normalize_field_names(financial_data)
             financial_data['data_source'] = 'FMP'
             financial_data['timestamp'] = datetime.now().isoformat()
             
