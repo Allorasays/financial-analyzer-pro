@@ -80,7 +80,8 @@ except ImportError as e:
     EMAIL_SERVICE_AVAILABLE = False
     email_service = None
 
-load_dotenv()
+# In development, .env overrides stale shell variables; on Render, platform env wins.
+load_dotenv(override=os.getenv("ENVIRONMENT", "development").lower() != "production")
 
 # Simple cache implementation for ML predictions
 class SimpleCache:
