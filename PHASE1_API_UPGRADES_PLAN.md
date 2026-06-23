@@ -153,10 +153,10 @@ val advancedFinancialsUrl = "https://financialmodelingprep.com/api/v3/income-sta
 ```javascript
 // Add to constants.js
 export const API_KEYS = {
-  TIINGO: '8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46',
-  NEWSAPI: '7d3d96223d67427f80773dfa3fdf37b8',
-  ALPHA_VANTAGE: 'C04TV0QS7GVJF0RU',
-  POLYGON: 'gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm',
+  TIINGO: 'YOUR_TIINGO_API_KEY',
+  NEWSAPI: 'YOUR_NEWSAPI_KEY',
+  ALPHA_VANTAGE: 'YOUR_ALPHAVANTAGE_API_KEY',
+  POLYGON: 'YOUR_POLYGON_API_KEY',
   FMP: 'YOUR_NEW_FMP_STARTER_KEY_HERE',  // Updated
   FRED: 'YOUR_FRED_API_KEY_HERE',        // New
 };

@@ -123,8 +123,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security
-SECRET_KEY = os.getenv("SECRET_KEY", "your-secret-key-here")
+# Security — require a real secret in production
+_ENVIRONMENT = os.getenv("ENVIRONMENT", "development").lower()
+_SECRET_FROM_ENV = os.getenv("SECRET_KEY", "")
+if _ENVIRONMENT == "production" and (
+    not _SECRET_FROM_ENV or _SECRET_FROM_ENV == "your-secret-key-here"
+):
+    raise RuntimeError(
+        "SECRET_KEY must be set to a strong random value when ENVIRONMENT=production"
+    )
+SECRET_KEY = _SECRET_FROM_ENV or "your-secret-key-here"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
@@ -742,6 +750,25 @@ class DatabaseManager:
                 return None
         except Exception as e:
             print(f"Error getting cached market data: {e}")
+            return None
+
+    def get_cached_market_data_stale(self, ticker: str, data_type: str):
+        """Get most recent cached data even if TTL expired (stale fallback)."""
+        try:
+            with self.get_db_cursor() as cursor:
+                cursor.execute('''
+                    SELECT data_json, created_at FROM market_data_cache
+                    WHERE ticker = ? AND data_type = ?
+                    ORDER BY created_at DESC LIMIT 1
+                ''', (ticker, data_type))
+                result = cursor.fetchone()
+                if result:
+                    payload = json.loads(result[0])
+                    payload['_db_cached_at'] = result[1]
+                    return payload
+                return None
+        except Exception as e:
+            print(f"Error getting stale cached market data: {e}")
             return None
     
     def cleanup_expired_data(self):
@@ -3003,9 +3030,52 @@ async def get_stock_data(ticker: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error fetching stock data: {str(e)}")
 
-# In-memory cache for personal-use deployments (reduces third-party API calls)
+# In-memory + SQLite cache for personal-use deployments (reduces third-party API calls)
 _financials_cache: Dict[str, Dict[str, Any]] = {}
 _financials_cache_lock = threading.Lock()
+_FINANCIALS_CACHE_TYPE = "financials"
+
+
+def _financials_cache_read(symbol: str, ttl: int, now: float, allow_stale: bool = False):
+    entry = None
+    with _financials_cache_lock:
+        entry = _financials_cache.get(symbol)
+        if entry and (now - entry['ts']) < ttl:
+            return entry, False
+
+    db_payload = db_manager.get_cached_market_data(symbol, _FINANCIALS_CACHE_TYPE)
+    if db_payload:
+        ts = float(db_payload.get('_cached_ts') or 0)
+        data = {k: v for k, v in db_payload.items() if not k.startswith('_')}
+        if ts and (now - ts) < ttl:
+            with _financials_cache_lock:
+                _financials_cache[symbol] = {'ts': ts, 'data': data}
+            return {'ts': ts, 'data': data}, False
+
+    if allow_stale:
+        if entry:
+            return entry, True
+        stale_db = db_manager.get_cached_market_data_stale(symbol, _FINANCIALS_CACHE_TYPE)
+        if stale_db:
+            ts = float(stale_db.get('_cached_ts') or 0)
+            data = {k: v for k, v in stale_db.items() if not k.startswith('_')}
+            if data:
+                return {'ts': ts or now, 'data': data}, True
+    return None, False
+
+
+def _financials_cache_write(symbol: str, payload: Dict[str, Any], ts: float):
+    with _financials_cache_lock:
+        _financials_cache[symbol] = {'ts': ts, 'data': dict(payload)}
+    ttl_minutes = max(1, PERSONAL_USE_CONFIG['financials_cache_ttl'] // 60)
+    db_payload = dict(payload)
+    db_payload['_cached_ts'] = ts
+    db_manager.cache_market_data(
+        symbol,
+        _FINANCIALS_CACHE_TYPE,
+        json.dumps(db_payload),
+        cache_duration_minutes=ttl_minutes,
+    )
 
 
 def _count_financial_fields(data: Dict[str, Any]) -> int:
@@ -3081,29 +3151,27 @@ async def get_financial_metrics(ticker: str):
     ttl = PERSONAL_USE_CONFIG['financials_cache_ttl']
     now = time.time()
 
-    with _financials_cache_lock:
-        cached_entry = _financials_cache.get(symbol)
-        if cached_entry and (now - cached_entry['ts']) < ttl:
-            payload = dict(cached_entry['data'])
-            return _attach_personal_use_metadata(
-                payload,
-                cached=True,
-                cached_at=datetime.fromtimestamp(cached_entry['ts']).isoformat(),
-            )
+    cached_entry, _ = _financials_cache_read(symbol, ttl, now, allow_stale=False)
+    if cached_entry:
+        payload = dict(cached_entry['data'])
+        return _attach_personal_use_metadata(
+            payload,
+            cached=True,
+            cached_at=datetime.fromtimestamp(cached_entry['ts']).isoformat(),
+        )
 
     try:
         financial_data = comprehensive_financial_aggregator.get_comprehensive_financial_data(symbol)
         non_null_count = _count_financial_fields(financial_data)
 
         if non_null_count < 3:
-            with _financials_cache_lock:
-                stale = _financials_cache.get(symbol)
-            if stale:
-                payload = dict(stale['data'])
+            stale_entry, _ = _financials_cache_read(symbol, ttl, now, allow_stale=True)
+            if stale_entry:
+                payload = dict(stale_entry['data'])
                 return _attach_personal_use_metadata(
                     payload,
                     cached=True,
-                    cached_at=datetime.fromtimestamp(stale['ts']).isoformat(),
+                    cached_at=datetime.fromtimestamp(stale_entry['ts']).isoformat(),
                 )
             raise HTTPException(
                 status_code=503,
@@ -3114,8 +3182,7 @@ async def get_financial_metrics(ticker: str):
             )
 
         financial_data = _attach_personal_use_metadata(financial_data, cached=False)
-        with _financials_cache_lock:
-            _financials_cache[symbol] = {'ts': now, 'data': dict(financial_data)}
+        _financials_cache_write(symbol, financial_data, now)
 
         print(f"[Result] /api/financials/{symbol}: {non_null_count} fields, sources={financial_data.get('data_source')}")
         return financial_data
@@ -3124,14 +3191,13 @@ async def get_financial_metrics(ticker: str):
         raise
     except Exception as e:
         print(f"[Error] /api/financials/{symbol}: {e}")
-        with _financials_cache_lock:
-            stale = _financials_cache.get(symbol)
-        if stale:
-            payload = dict(stale['data'])
+        stale_entry, _ = _financials_cache_read(symbol, ttl, now, allow_stale=True)
+        if stale_entry:
+            payload = dict(stale_entry['data'])
             return _attach_personal_use_metadata(
                 payload,
                 cached=True,
-                cached_at=datetime.fromtimestamp(stale['ts']).isoformat(),
+                cached_at=datetime.fromtimestamp(stale_entry['ts']).isoformat(),
             )
         raise HTTPException(
             status_code=503,
