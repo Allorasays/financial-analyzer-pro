@@ -121,7 +121,12 @@ data class FinancialDataResponse(
     
     // Metadata
     val timestamp: String? = null,
-    val data_source: String? = null
+    val data_source: String? = null,
+    val data_sources: String? = null,
+    val personal_use_only: Boolean? = null,
+    val usage_notice: String? = null,
+    val cached: Boolean? = null,
+    val cached_at: String? = null
 )
 
 // Legacy models kept for backward compatibility (if needed elsewhere)

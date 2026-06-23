@@ -1,7 +1,6 @@
 """
-Comprehensive Financial Data Aggregator (canonical)
-Uses ALL available APIs: FMP, Alpha Vantage, Polygon.io, SEC EDGAR, yfinance.
-This is the single source of truth for /api/financials — env keys only, no defaults.
+Financial Data Aggregator
+Combines data from multiple APIs (FMP, Alpha Vantage, yfinance, SEC EDGAR) to maximize data coverage
 """
 
 import requests
@@ -10,46 +9,30 @@ import logging
 from typing import Dict, Any, Optional
 from datetime import datetime
 import yfinance as yf
-import time
 
 logger = logging.getLogger(__name__)
 
 
-class ComprehensiveFinancialAggregator:
-    """Aggregates financial data from ALL available sources to maximize coverage"""
+class FinancialDataAggregator:
+    """Aggregates financial data from multiple sources to maximize coverage"""
     
     def __init__(self):
-        # Personal use: supply your own keys via environment variables (.env).
-        self.fmp_api_key = os.getenv('FMP_API_KEY', '').strip()
-        self.alpha_vantage_key = os.getenv('ALPHAVANTAGE_API_KEY', '').strip()
-        self.polygon_key = os.getenv('POLYGON_API_KEY', '').strip()
-        self.tiingo_key = os.getenv('TIINGO_API_KEY', '').strip()
-        
-        # Rate limiting
-        self.last_alpha_vantage_call = 0
-        self.alpha_vantage_min_interval = 12  # 5 requests/minute = 12 seconds between calls
+        self.fmp_api_key = os.getenv('FMP_API_KEY', 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve')
+        self.alpha_vantage_key = os.getenv('ALPHAVANTAGE_API_KEY', 'C04TV0QS7GVJF0RU')
+        self.polygon_key = os.getenv('POLYGON_API_KEY', 'gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm')
     
     def _merge_data(self, base_data: Dict, new_data: Dict) -> Dict:
-        """Merge new_data into base_data, filling gaps with non-None values"""
+        """Merge new_data into base_data, only adding non-None values that don't exist in base_data"""
         merged = base_data.copy()
         for key, value in new_data.items():
             # Skip metadata fields
             if key in ['data_source', 'timestamp', 'ticker', 'data_sources', 'data_coverage']:
                 continue
-            # Only add if value is not None and (field doesn't exist or base value is None)
+            # Only add if value is not None and (field doesn't exist in base or base value is None)
             if value is not None:
                 if key not in merged or merged[key] is None:
                     merged[key] = value
         return merged
-    
-    def _safe_float(self, value) -> Optional[float]:
-        """Safely convert value to float"""
-        if value is None or value == '' or value == 'None':
-            return None
-        try:
-            return float(value)
-        except (ValueError, TypeError):
-            return None
     
     def _get_fmp_data(self, ticker: str) -> Dict[str, Any]:
         """Get data from Financial Modeling Prep"""
@@ -64,21 +47,11 @@ class ComprehensiveFinancialAggregator:
             return {}
     
     def _get_alpha_vantage_data(self, ticker: str) -> Dict[str, Any]:
-        """Get data from Alpha Vantage (with rate limiting)"""
+        """Get data from Alpha Vantage"""
         if not self.alpha_vantage_key:
             return {}
         
-        # Rate limiting: 5 requests/minute
-        current_time = time.time()
-        time_since_last = current_time - self.last_alpha_vantage_call
-        if time_since_last < self.alpha_vantage_min_interval:
-            wait_time = self.alpha_vantage_min_interval - time_since_last
-            logger.debug(f"Alpha Vantage rate limit: waiting {wait_time:.1f}s")
-            time.sleep(wait_time)
-        
         try:
-            self.last_alpha_vantage_call = time.time()
-            
             # Overview
             overview_url = f"https://www.alphavantage.co/query?function=OVERVIEW&symbol={ticker}&apikey={self.alpha_vantage_key}"
             overview_response = requests.get(overview_url, timeout=10)
@@ -90,6 +63,22 @@ class ComprehensiveFinancialAggregator:
                 if 'Error Message' in overview_data or 'Note' in overview_data:
                     return {}
                 
+                # Income Statement
+                income_url = f"https://www.alphavantage.co/query?function=INCOME_STATEMENT&symbol={ticker}&apikey={self.alpha_vantage_key}"
+                income_response = requests.get(income_url, timeout=10)
+                income_data = income_response.json() if income_response.status_code == 200 else {}
+                
+                # Balance Sheet
+                balance_url = f"https://www.alphavantage.co/query?function=BALANCE_SHEET&symbol={ticker}&apikey={self.alpha_vantage_key}"
+                balance_response = requests.get(balance_url, timeout=10)
+                balance_data = balance_response.json() if balance_response.status_code == 200 else {}
+                
+                # Cash Flow
+                cashflow_url = f"https://www.alphavantage.co/query?function=CASH_FLOW&symbol={ticker}&apikey={self.alpha_vantage_key}"
+                cashflow_response = requests.get(cashflow_url, timeout=10)
+                cashflow_data = cashflow_response.json() if cashflow_response.status_code == 200 else {}
+                
+                # Extract and combine data
                 financial_data = {}
                 
                 # From Overview
@@ -129,6 +118,55 @@ class ComprehensiveFinancialAggregator:
                         'shares_outstanding': self._safe_float(overview_data.get('SharesOutstanding')),
                     })
                 
+                # From Income Statement (most recent annual)
+                if income_data and isinstance(income_data, dict) and 'annualReports' in income_data:
+                    annual_reports = income_data['annualReports']
+                    if annual_reports and len(annual_reports) > 0:
+                        latest = annual_reports[0]
+                        financial_data.update({
+                            'revenue': financial_data.get('revenue') or self._safe_float(latest.get('totalRevenue')),
+                            'gross_profit': financial_data.get('gross_profit') or self._safe_float(latest.get('grossProfit')),
+                            'operating_income': self._safe_float(latest.get('operatingIncome')),
+                            'net_income': self._safe_float(latest.get('netIncome')),
+                            'total_revenue': self._safe_float(latest.get('totalRevenue')),
+                            'cost_of_revenue': self._safe_float(latest.get('costOfRevenue')),
+                            'total_operating_expenses': self._safe_float(latest.get('totalOperatingExpenses')),
+                            'income_before_tax': self._safe_float(latest.get('incomeBeforeTax')),
+                            'income_tax_expense': self._safe_float(latest.get('incomeTaxExpense')),
+                        })
+                
+                # From Balance Sheet (most recent annual)
+                if balance_data and isinstance(balance_data, dict) and 'annualReports' in balance_data:
+                    annual_reports = balance_data['annualReports']
+                    if annual_reports and len(annual_reports) > 0:
+                        latest = annual_reports[0]
+                        financial_data.update({
+                            'total_assets': self._safe_float(latest.get('totalAssets')),
+                            'total_current_assets': self._safe_float(latest.get('totalCurrentAssets')),
+                            'cash_and_equivalents': self._safe_float(latest.get('cashAndCashEquivalentsAtCarryingValue')),
+                            'total_liabilities': self._safe_float(latest.get('totalLiabilities')),
+                            'total_current_liabilities': self._safe_float(latest.get('totalCurrentLiabilities')),
+                            'total_debt': self._safe_float(latest.get('totalDebt')),
+                            'total_equity': self._safe_float(latest.get('totalShareholderEquity')),
+                            'retained_earnings': self._safe_float(latest.get('retainedEarnings')),
+                            'common_stock': self._safe_float(latest.get('commonStock')),
+                        })
+                
+                # From Cash Flow (most recent annual)
+                if cashflow_data and isinstance(cashflow_data, dict) and 'annualReports' in cashflow_data:
+                    annual_reports = cashflow_data['annualReports']
+                    if annual_reports and len(annual_reports) > 0:
+                        latest = annual_reports[0]
+                        financial_data.update({
+                            'operating_cash_flow': self._safe_float(latest.get('operatingCashflow')),
+                            'capital_expenditure': self._safe_float(latest.get('capitalExpenditures')),
+                            'free_cash_flow': self._safe_float(latest.get('operatingCashflow')) - abs(self._safe_float(latest.get('capitalExpenditures', 0)) or 0),
+                            'cashflow_from_investing': self._safe_float(latest.get('cashflowFromInvestment')),
+                            'cashflow_from_financing': self._safe_float(latest.get('cashflowFromFinancing')),
+                            'dividends_paid': self._safe_float(latest.get('dividendsPaid')),
+                            'net_change_in_cash': self._safe_float(latest.get('netChangeInCash')),
+                        })
+                
                 if financial_data:
                     financial_data['data_source'] = 'Alpha Vantage'
                     return financial_data
@@ -137,166 +175,8 @@ class ComprehensiveFinancialAggregator:
         
         return {}
     
-    def _get_polygon_data(self, ticker: str) -> Dict[str, Any]:
-        """Get data from Polygon.io"""
-        if not self.polygon_key:
-            return {}
-        
-        try:
-            # Get ticker details
-            url = f"https://api.polygon.io/v3/reference/tickers/{ticker}"
-            params = {'apiKey': self.polygon_key}
-            response = requests.get(url, params=params, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                if 'results' in data and data['results']:
-                    ticker_info = data['results']
-                    financial_data = {
-                        'company_name': ticker_info.get('name'),
-                        'market': ticker_info.get('market'),
-                        'locale': ticker_info.get('locale'),
-                        'primary_exchange': ticker_info.get('primary_exchange'),
-                        'type': ticker_info.get('type'),
-                        'active': ticker_info.get('active'),
-                        'currency': ticker_info.get('currency_name'),
-                        'cik': ticker_info.get('cik'),
-                        'composite_figi': ticker_info.get('composite_figi'),
-                        'share_class_figi': ticker_info.get('share_class_figi'),
-                    }
-                    
-                    # Get financials if available
-                    try:
-                        financials_url = f"https://api.polygon.io/vX/reference/financials"
-                        financials_params = {'ticker': ticker, 'apiKey': self.polygon_key, 'limit': 1}
-                        financials_response = requests.get(financials_url, params=financials_params, timeout=10)
-                        
-                        if financials_response.status_code == 200:
-                            financials_data = financials_response.json()
-                            if 'results' in financials_data and financials_data['results']:
-                                latest_financials = financials_data['results'][0]
-                                if 'financials' in latest_financials:
-                                    fin = latest_financials['financials']
-                                    financial_data.update({
-                                        'revenue': self._safe_float(fin.get('revenues')),
-                                        'net_income': self._safe_float(fin.get('net_income_loss')),
-                                        'total_assets': self._safe_float(fin.get('assets')),
-                                        'total_equity': self._safe_float(fin.get('equity')),
-                                    })
-                    except:
-                        pass
-                    
-                    if financial_data:
-                        financial_data['data_source'] = 'Polygon.io'
-                        return financial_data
-        except Exception as e:
-            logger.debug(f"Polygon.io data fetch failed for {ticker}: {e}")
-        
-        return {}
-    
-    def _get_sec_edgar_data(self, ticker: str) -> Dict[str, Any]:
-        """Get data from SEC EDGAR (free, official)"""
-        try:
-            # Try new structured SEC EDGAR client first
-            try:
-                from sec_edgar import SecEdgarClient, CIKResolver, CompanyFactsService
-                client = SecEdgarClient()
-                cik_resolver = CIKResolver(client)
-                cik = cik_resolver.cik_from_ticker(ticker)
-                facts_service = CompanyFactsService(client)
-                financial_data = facts_service.extract_financial_metrics(ticker, cik)
-                if financial_data:
-                    financial_data['data_source'] = 'SEC EDGAR'
-                    return financial_data
-            except ImportError:
-                # Fallback to old service
-                pass
-            except Exception as e:
-                logger.debug(f"New SEC EDGAR client failed: {e}, trying fallback")
-            
-            # Fallback to old SEC EDGAR service
-            from sec_edgar_service import SECEdgarService
-            sec_service = SECEdgarService()
-            company_facts = sec_service.get_company_facts(ticker)
-            
-            if company_facts:
-                financial_data = {}
-                
-                # Extract key financial metrics from SEC data
-                if 'facts' in company_facts and 'us-gaap' in company_facts['facts']:
-                    gaap = company_facts['facts']['us-gaap']
-                    
-                    # Revenue - try different keys
-                    for rev_key in ['Revenues', 'RevenueFromContractWithCustomerExcludingAssessedTax']:
-                        if rev_key in gaap:
-                            revenues = gaap[rev_key]
-                            if 'units' in revenues and 'USD' in revenues['units']:
-                                usd_units = revenues['units']['USD']
-                                if usd_units:
-                                    # Get most recent annual (10-K) or quarterly
-                                    annual = [x for x in usd_units if x.get('form') == '10-K']
-                                    if annual:
-                                        latest = sorted(annual, key=lambda x: x.get('end', ''), reverse=True)[0]
-                                        val = self._safe_float(latest.get('val'))
-                                        if val:
-                                            financial_data['revenue'] = val
-                                            break
-                    
-                    # Net Income
-                    for ni_key in ['NetIncomeLoss', 'ProfitLoss']:
-                        if ni_key in gaap:
-                            net_income = gaap[ni_key]
-                            if 'units' in net_income and 'USD' in net_income['units']:
-                                usd_units = net_income['units']['USD']
-                                if usd_units:
-                                    annual = [x for x in usd_units if x.get('form') == '10-K']
-                                    if annual:
-                                        latest = sorted(annual, key=lambda x: x.get('end', ''), reverse=True)[0]
-                                        val = self._safe_float(latest.get('val'))
-                                        if val:
-                                            financial_data['net_income'] = val
-                                            break
-                    
-                    # Total Assets
-                    if 'Assets' in gaap:
-                        assets = gaap['Assets']
-                        if 'units' in assets and 'USD' in assets['units']:
-                            usd_units = assets['units']['USD']
-                            if usd_units:
-                                annual = [x for x in usd_units if x.get('form') == '10-K']
-                                if annual:
-                                    latest = sorted(annual, key=lambda x: x.get('end', ''), reverse=True)[0]
-                                    val = self._safe_float(latest.get('val'))
-                                    if val:
-                                        financial_data['total_assets'] = val
-                    
-                    # Total Equity
-                    for eq_key in ['StockholdersEquity', 'Equity']:
-                        if eq_key in gaap:
-                            equity = gaap[eq_key]
-                            if 'units' in equity and 'USD' in equity['units']:
-                                usd_units = equity['units']['USD']
-                                if usd_units:
-                                    annual = [x for x in usd_units if x.get('form') == '10-K']
-                                    if annual:
-                                        latest = sorted(annual, key=lambda x: x.get('end', ''), reverse=True)[0]
-                                        val = self._safe_float(latest.get('val'))
-                                        if val:
-                                            financial_data['total_equity'] = val
-                                            break
-                
-                if financial_data:
-                    financial_data['data_source'] = 'SEC EDGAR'
-                    return financial_data
-        except Exception as e:
-            logger.debug(f"SEC EDGAR data fetch failed for {ticker}: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-        
-        return {}
-    
     def _get_yfinance_data(self, ticker: str) -> Dict[str, Any]:
-        """Get comprehensive data from yfinance"""
+        """Get data from yfinance"""
         try:
             stock = yf.Ticker(ticker)
             info = stock.info
@@ -304,8 +184,10 @@ class ComprehensiveFinancialAggregator:
             def safe_get(key, default=None, allow_zero=True):
                 """Get value from info dict, preserving 0 and False as valid values"""
                 value = info.get(key, default)
+                # Only return None for truly missing/invalid values
                 if value is None or value == '':
                     return None
+                # Handle NaN and infinity values
                 try:
                     if isinstance(value, float):
                         import math
@@ -313,11 +195,12 @@ class ComprehensiveFinancialAggregator:
                             return None
                 except:
                     pass
+                # For most financial metrics, 0 is a valid value
                 if not allow_zero and value == 0:
                     return None
                 return value
             
-            # Comprehensive financial data from yfinance
+            # Comprehensive financial data from yfinance (matches original proxy.py mapping)
             financial_data = {
                 # Company Information
                 'company_name': info.get('longName') or info.get('shortName'),
@@ -433,17 +316,26 @@ class ComprehensiveFinancialAggregator:
                 'held_percent_institutions': safe_get('heldPercentInstitutions'),
             }
             
+            # Keep all fields (including None) - merge logic will handle filling gaps
             financial_data['data_source'] = 'yfinance'
             return financial_data
         except Exception as e:
             logger.debug(f"yfinance data fetch failed for {ticker}: {e}")
             return {}
     
+    def _safe_float(self, value) -> Optional[float]:
+        """Safely convert value to float"""
+        if value is None or value == '' or value == 'None':
+            return None
+        try:
+            return float(value)
+        except (ValueError, TypeError):
+            return None
+    
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
         """
-        Get comprehensive financial data by aggregating from ALL available sources.
-        Priority: FMP -> yfinance -> Alpha Vantage -> Polygon -> SEC EDGAR
-        (FMP first so yfinance rate limits do not block the response.)
+        Get comprehensive financial data by aggregating from multiple sources
+        Priority: FMP > Alpha Vantage > yfinance
         """
         ticker = ticker.upper()
         financial_data = {
@@ -452,66 +344,43 @@ class ComprehensiveFinancialAggregator:
             'data_sources': []
         }
         
-        # Step 1: FMP when user has configured a personal API key
-        fmp_data = self._get_fmp_data(ticker)
-        if fmp_data:
-            financial_data = self._merge_data(financial_data, fmp_data)
-            financial_data['data_sources'].append('FMP')
-            fmp_non_null = len([v for k, v in fmp_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] FMP: {fmp_non_null} fields for {ticker}")
-        
-        # Step 2: yfinance (optional enrichment; failures are non-fatal)
+        # Priority 1: Start with yfinance to get comprehensive field structure (even if some are None)
+        # This ensures we have all possible fields defined
         yf_data = self._get_yfinance_data(ticker)
         if yf_data:
             financial_data = self._merge_data(financial_data, yf_data)
-            if 'yfinance' not in financial_data['data_sources']:
-                financial_data['data_sources'].append('yfinance')
+            financial_data['data_sources'].append('yfinance')
             yf_non_null = len([v for k, v in yf_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] yfinance: {yf_non_null} fields for {ticker}")
+            logger.info(f"[Aggregator] yfinance data added for {ticker}: {yf_non_null} non-null fields")
         
-        # Step 3: Add Alpha Vantage data (good financial statements)
+        # Priority 2: Add FMP data to fill gaps (most comprehensive financial statements)
+        fmp_data = self._get_fmp_data(ticker)
+        if fmp_data:
+            financial_data = self._merge_data(financial_data, fmp_data)
+            if 'FMP' not in financial_data['data_sources']:
+                financial_data['data_sources'].append('FMP')
+            fmp_non_null = len([v for k, v in fmp_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
+            logger.info(f"[Aggregator] FMP data added for {ticker}: {fmp_non_null} non-null fields")
+        
+        # Priority 3: Add Alpha Vantage data to fill remaining gaps
         av_data = self._get_alpha_vantage_data(ticker)
         if av_data:
             financial_data = self._merge_data(financial_data, av_data)
             if 'Alpha Vantage' not in financial_data['data_sources']:
                 financial_data['data_sources'].append('Alpha Vantage')
             av_non_null = len([v for k, v in av_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] Alpha Vantage: {av_non_null} fields for {ticker}")
+            logger.info(f"[Aggregator] Alpha Vantage data added for {ticker}: {av_non_null} non-null fields")
         
-        # Step 4: Add Polygon.io data (market data, company info)
-        polygon_data = self._get_polygon_data(ticker)
-        if polygon_data:
-            financial_data = self._merge_data(financial_data, polygon_data)
-            if 'Polygon.io' not in financial_data['data_sources']:
-                financial_data['data_sources'].append('Polygon.io')
-            polygon_non_null = len([v for k, v in polygon_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] Polygon.io: {polygon_non_null} fields for {ticker}")
-        
-        # Step 5: Add SEC EDGAR data (official, free, authoritative)
-        sec_data = self._get_sec_edgar_data(ticker)
-        if sec_data:
-            financial_data = self._merge_data(financial_data, sec_data)
-            if 'SEC EDGAR' not in financial_data['data_sources']:
-                financial_data['data_sources'].append('SEC EDGAR')
-            sec_non_null = len([v for k, v in sec_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] SEC EDGAR: {sec_non_null} fields for {ticker}")
-        
-        # Calculate total data coverage
+        # Calculate data coverage (non-null fields)
         non_null_count = len([v for k, v in financial_data.items() if k not in ['data_source', 'data_sources', 'timestamp', 'ticker', 'data_coverage'] and v is not None])
         financial_data['data_coverage'] = non_null_count
         financial_data['data_source'] = '+'.join(financial_data['data_sources']) if financial_data['data_sources'] else 'none'
         
-        logger.info(f"[Comprehensive Aggregator] ✅ Total for {ticker}: {non_null_count} non-null fields from {len(financial_data['data_sources'])} sources: {financial_data['data_source']}")
-        
-        # Debug: Log sample key fields to verify data
-        key_fields = ['revenue', 'net_income', 'ebitda', 'operating_cash_flow', 'total_assets', 'total_debt', 'market_cap', 'pe_ratio']
-        sample_data = {k: financial_data.get(k) for k in key_fields if financial_data.get(k) is not None}
-        if sample_data:
-            logger.info(f"[Comprehensive Aggregator] Sample fields for {ticker}: {list(sample_data.keys())}")
+        logger.info(f"[Aggregator] Total data coverage for {ticker}: {non_null_count} non-null fields from {len(financial_data['data_sources'])} sources")
         
         return financial_data
 
 
 # Global instance
-comprehensive_financial_aggregator = ComprehensiveFinancialAggregator()
+financial_data_aggregator = FinancialDataAggregator()
 

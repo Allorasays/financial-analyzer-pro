@@ -21,6 +21,9 @@ import java.util.*
 import com.financialanalyzer.mobile.data.network.RetrofitClient
 import com.financialanalyzer.mobile.data.model.*
 import com.financialanalyzer.mobile.data.repository.OfflineDataRepository
+import com.financialanalyzer.mobile.data.repository.FinancialAnalyzerRepository
+import com.financialanalyzer.mobile.data.security.ApiKeyManager
+import com.google.gson.Gson
 import com.financialanalyzer.mobile.data.network.NetworkStatusManager
 import com.financialanalyzer.mobile.data.database.entities.*
 import com.financialanalyzer.mobile.ui.auth.SimpleAuthDialogManager
@@ -40,6 +43,8 @@ class MainActivityLiveRealData : AppCompatActivity() {
     
     // Offline mode components
     private lateinit var offlineRepository: OfflineDataRepository
+    private val financialRepository = FinancialAnalyzerRepository()
+    private val gson = Gson()
     private lateinit var networkStatusManager: NetworkStatusManager
     private var isOnline = true
     
@@ -138,6 +143,7 @@ class MainActivityLiveRealData : AppCompatActivity() {
             // Initialize offline mode components with error handling
             try {
                 offlineRepository = OfflineDataRepository(this)
+                ApiKeyManager.migrateFromLegacyPrefs(this)
                 networkStatusManager = NetworkStatusManager(this)
                 Log.d("MainActivity", "Offline components initialized successfully")
             } catch (e: Exception) {
@@ -3140,45 +3146,54 @@ class MainActivityLiveRealData : AppCompatActivity() {
             try {
                 Log.d("MainActivity", "Starting analysis for $ticker using backend API")
                 
-                // PRIORITY 1: Fetch comprehensive financial data from backend (uses FMP + yfinance)
+                // PRIORITY 1: Backend API (keys live on Render — preferred for personal use)
+                var usedOfflineCache = false
                 val financialData: FinancialDataResponse? = try {
                     Log.d("MainActivity", "Fetching financial data from backend API for $ticker")
-                    val response = apiService.getFinancialData(ticker.uppercase())
-                    Log.d("MainActivity", "Backend API response code: ${response.code()}, isSuccessful: ${response.isSuccessful}")
-                    
-                    if (response.isSuccessful) {
-                        val body = response.body()
-                        Log.d("MainActivity", "Response body is null: ${body == null}")
-                        
-                        if (body != null) {
-                            // Verify we have actual data (not just empty structure)
-                            val hasData = body.current_price != null || 
-                                        body.revenue != null || 
-                                        body.market_cap != null ||
-                                        body.pe_ratio != null
-                            
-                            if (hasData) {
-                                Log.d("MainActivity", "✅ Backend financial data fetched successfully for $ticker with real values")
-                                body
-                            } else {
-                                Log.w("MainActivity", "Backend API returned empty data structure for $ticker")
-                                null
+                    val apiResult = financialRepository.getFinancialData(ticker.uppercase())
+                    if (apiResult.data != null) {
+                        val body = apiResult.data
+                        val hasData = body.current_price != null ||
+                                body.revenue != null ||
+                                body.market_cap != null ||
+                                body.pe_ratio != null
+                        if (hasData) {
+                            if (::offlineRepository.isInitialized) {
+                                offlineRepository.cacheAnalysis(
+                                    ticker.uppercase(),
+                                    gson.toJson(body),
+                                    "",
+                                    ""
+                                )
                             }
+                            Log.d("MainActivity", "Backend financial data fetched for $ticker")
+                            body
                         } else {
-                            Log.w("MainActivity", "Backend API returned null body for $ticker")
+                            Log.w("MainActivity", "Backend API returned empty data structure for $ticker")
                             null
                         }
                     } else {
-                        Log.w("MainActivity", "Backend API returned error: ${response.code()} - ${response.message()}")
-                        val errorBody = response.errorBody()?.string()
-                        Log.w("MainActivity", "Error body: $errorBody")
+                        Log.w("MainActivity", "Backend API error: ${apiResult.error}")
                         null
                     }
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Error fetching financial data from backend: ${e.message}", e)
-                    Log.e("MainActivity", "Exception type: ${e.javaClass.simpleName}")
-                    e.printStackTrace()
                     null
+                } ?: run {
+                    if (::offlineRepository.isInitialized) {
+                        val cached = offlineRepository.getCachedAnalysis(ticker.uppercase())
+                        if (cached != null && cached.analysisData.isNotBlank()) {
+                            try {
+                                val parsed = gson.fromJson(cached.analysisData, FinancialDataResponse::class.java)
+                                usedOfflineCache = true
+                                Log.d("MainActivity", "Using offline cached financial data for $ticker")
+                                parsed
+                            } catch (e: Exception) {
+                                Log.w("MainActivity", "Failed to parse offline cache: ${e.message}")
+                                null
+                            }
+                        } else null
+                    } else null
                 }
                 
                 // FALLBACK: Always use direct FMP calls if backend fails or returns empty data
@@ -3220,8 +3235,17 @@ class MainActivityLiveRealData : AppCompatActivity() {
                         
                         if (hasValidData) {
                             Log.d("MainActivity", "Using backend financial data for $ticker")
-                            Toast.makeText(this@MainActivityLiveRealData, "✅ Analysis complete for $ticker! (Backend API)", Toast.LENGTH_SHORT).show()
-                            showStockAnalysisDialogWithBackendData(ticker, stockData, data, mlPredictions, sentimentData)
+                            val sourceLabel = when {
+                                usedOfflineCache -> "Offline cache"
+                                data.cached == true -> "Backend cache"
+                                else -> "Backend API"
+                            }
+                            Toast.makeText(
+                                this@MainActivityLiveRealData,
+                                "Analysis complete for $ticker ($sourceLabel)",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                            showStockAnalysisDialogWithBackendData(ticker, stockData, data, mlPredictions, sentimentData, usedOfflineCache)
                             true
                         } else {
                             false
@@ -3960,7 +3984,8 @@ class MainActivityLiveRealData : AppCompatActivity() {
         stockData: StockAnalysisData,
         financialData: FinancialDataResponse,
         mlPredictions: MLPredictionsData,
-        sentimentData: SentimentData?
+        sentimentData: SentimentData?,
+        fromDeviceCache: Boolean = false
     ) {
         // Create detailed analysis dialog
         val dialog = android.app.AlertDialog.Builder(this)
@@ -3971,21 +3996,36 @@ class MainActivityLiveRealData : AppCompatActivity() {
             setBackgroundColor(android.graphics.Color.parseColor("#1a1a1a"))
         }
 
+        val naHint = "not reported by ${financialData.data_source ?: "data source"}"
+        fun formatValue(value: Double?): String = value?.let { String.format("%.2f", it) } ?: "N/A ($naHint)"
+        fun formatValue(value: Long?): String = value?.let { formatNumber(it) } ?: "N/A ($naHint)"
+        fun formatPercent(value: Double?): String = value?.let { "${String.format("%.2f", it * 100)}%" } ?: "N/A ($naHint)"
+        fun formatCurrency(value: Double?): String = value?.let { "$${String.format("%.2f", it)}" } ?: "N/A ($naHint)"
+        fun formatCurrency(value: Long?): String = value?.let { "$${formatNumber(it)}" } ?: "N/A ($naHint)"
+
+        val cacheStatus = when {
+            fromDeviceCache -> "Offline device cache (last successful fetch)"
+            financialData.cached == true -> "Server cache from ${financialData.cached_at ?: "earlier"}"
+            else -> "Live from backend"
+        }
+
         val analysisTitle = TextView(this).apply {
-            text = "📊 Comprehensive Stock Analysis: $ticker\n" +
-                   "Data Source: ${financialData.data_source ?: "Backend API"}"
+            text = "Comprehensive Stock Analysis: $ticker\n" +
+                   "Source: ${financialData.data_source ?: "Backend API"}\n" +
+                   "Status: $cacheStatus"
             textSize = 22f
             setTextColor(android.graphics.Color.parseColor("#FFFFFF"))
             gravity = android.view.Gravity.CENTER
             setPadding(0, 0, 0, 20)
         }
 
-        // Helper functions
-        fun formatValue(value: Double?): String = value?.let { String.format("%.2f", it) } ?: "N/A"
-        fun formatValue(value: Long?): String = value?.let { formatNumber(it) } ?: "N/A"
-        fun formatPercent(value: Double?): String = value?.let { "${String.format("%.2f", it * 100)}%" } ?: "N/A"
-        fun formatCurrency(value: Double?): String = value?.let { "$${String.format("%.2f", it)}" } ?: "N/A"
-        fun formatCurrency(value: Long?): String = value?.let { "$${formatNumber(it)}" } ?: "N/A"
+        val dataStatusSection = TextView(this).apply {
+            val notice = financialData.usage_notice ?: "Personal use only — configure API keys on Render and in Settings."
+            text = "Data status: $cacheStatus\n$notice"
+            textSize = 14f
+            setTextColor(android.graphics.Color.parseColor("#FFD700"))
+            setPadding(0, 0, 0, 16)
+        }
 
         // Current Price Section
         val priceSection = TextView(this).apply {
@@ -4166,6 +4206,7 @@ class MainActivityLiveRealData : AppCompatActivity() {
 
         // Add all sections
         analysisLayout.addView(analysisTitle)
+        analysisLayout.addView(dataStatusSection)
         analysisLayout.addView(priceSection)
         analysisLayout.addView(companySection)
         analysisLayout.addView(valuationSection)
@@ -4341,7 +4382,7 @@ class MainActivityLiveRealData : AppCompatActivity() {
         return withContext(Dispatchers.IO) {
             var lastError: Exception? = null
             
-            // PRIORITY 1: Financial Modeling Prep (Your API key: R9F8...8ve)
+            // PRIORITY 1: Financial Modeling Prep (personal API key from Settings)
             try {
                 Log.d("Financials", "🔍 Attempting Financial Modeling Prep API for $ticker...")
                 val fmpResult = fetchFromFinancialModelingPrep(ticker, stockData)
@@ -4419,10 +4460,8 @@ class MainActivityLiveRealData : AppCompatActivity() {
     
     private fun getPersonalFmpApiKey(): String? = getPersonalApiKey("fmp_api_key")
 
-    private fun getPersonalApiKey(prefKey: String): String? {
-        val key = getSharedPreferences("api_keys", MODE_PRIVATE).getString(prefKey, null)?.trim()
-        return if (key.isNullOrEmpty()) null else key
-    }
+    private fun getPersonalApiKey(prefKey: String): String? =
+        ApiKeyManager.getKey(this, prefKey)
 
     private suspend fun fetchFromFinancialModelingPrep(ticker: String, stockData: StockAnalysisData): FinancialStatements {
         return withContext(Dispatchers.IO) {
@@ -4669,7 +4708,11 @@ class MainActivityLiveRealData : AppCompatActivity() {
                 Log.d("TiingoAPI", "📊 Fetching financial data from Tiingo API for $ticker...")
                 
                 // Tiingo API - Using production API key
-                val tiingoApiKey = "8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46"
+                val tiingoApiKey = getPersonalApiKey("tiingo_api_key")
+                    ?: throw Exception(
+                        "Tiingo API key not configured. Add your licensed key in Settings " +
+                        "or rely on the backend /api/financials endpoint."
+                    )
                 val companyUrl = "https://api.tiingo.com/tiingo/daily/$ticker?token=$tiingoApiKey"
                 val priceUrl = "https://api.tiingo.com/tiingo/daily/$ticker/prices?token=$tiingoApiKey"
                 val historicalUrl = "https://api.tiingo.com/tiingo/daily/$ticker/prices?startDate=2024-01-01&endDate=2024-12-31&token=$tiingoApiKey"
