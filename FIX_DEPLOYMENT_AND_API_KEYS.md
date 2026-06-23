@@ -40,7 +40,7 @@ Stock analysis shows many N/A values because API keys are not configured.
 Add these environment variables:
 
 1. **FMP_API_KEY** (Financial Modeling Prep - BEST for comprehensive data)
-   - Value: `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve` (or your own key)
+   - Value: `YOUR_FMP_API_KEY` (get from https://financialmodelingprep.com/developer/docs/)
    - **Why**: Provides income statements, balance sheets, cash flow, ratios, key metrics
    - **Impact**: Reduces N/A values by 80%+
 

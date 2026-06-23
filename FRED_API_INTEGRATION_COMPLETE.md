@@ -3,7 +3,7 @@
 ## ✅ **What We've Accomplished**
 
 ### **🔑 FRED API Integration**
-- **API Key**: `9371fbb0a2b505b3262b5578f44016c5`
+- **API Key**: `YOUR_FRED_API_KEY`
 - **Provider**: Federal Reserve Economic Data (FRED)
 - **Status**: ✅ **ACTIVE & WORKING**
 - **Cost**: FREE

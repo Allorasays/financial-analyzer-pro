@@ -1,7 +1,7 @@
 """
-Comprehensive Financial Data Aggregator
-Uses ALL available APIs: FMP, Alpha Vantage, Polygon.io, SEC EDGAR, yfinance
-Maximizes data coverage by combining all sources
+Comprehensive Financial Data Aggregator (canonical)
+Uses ALL available APIs: FMP, Alpha Vantage, Polygon.io, SEC EDGAR, yfinance.
+This is the single source of truth for /api/financials — env keys only, no defaults.
 """
 
 import requests

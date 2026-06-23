@@ -184,3 +184,8 @@ Both email templates include:
 
 The email service is fully implemented and ready to use. It works with or without SendGrid configuration, making it perfect for both development and production environments.
 
+
+
+
+
+

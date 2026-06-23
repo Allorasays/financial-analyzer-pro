@@ -64,7 +64,7 @@ Look for these log messages:
 1. **Check Environment Variables in Render**:
    - Go to Render Dashboard → Your Service → Environment
    - Verify `FMP_API_KEY` is set correctly
-   - Should start with your key (e.g., `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve`)
+   - Should start with your key (e.g., `YOUR_FMP_API_KEY`)
 
 2. **Test the Endpoint**:
    ```bash
@@ -153,4 +153,9 @@ Look for these log messages:
 ✅ **Fixes Applied**: Code updated with better data validation and zero handling
 ⏳ **Pending**: Deployment to Render and testing
 📊 **Expected**: Significant reduction in N/A values, especially for major stocks
+
+
+
+
+
 

@@ -4,7 +4,7 @@
 ```python
 # In config.py
 FMP_CONFIG = {
-    'api_key': 'R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve',  # Current free key
+    'api_key': 'YOUR_FMP_API_KEY',  # Current free key
     'base_url': 'https://financialmodelingprep.com/api/v3',
     'rate_limit': 250,  # Free tier
     'tier': 'free'

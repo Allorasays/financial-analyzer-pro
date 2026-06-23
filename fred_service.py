@@ -3,11 +3,14 @@ FRED API Service
 Federal Reserve Economic Data integration
 """
 
+import os
 import requests
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import logging
+
+from config import FRED_CONFIG
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -17,7 +20,9 @@ class FREDService:
     """Service for interacting with FRED API"""
     
     def __init__(self, api_key: str = None):
-        self.api_key = api_key or "9371fbb0a2b505b3262b5578f44016c5"  # Real FRED API key
+        self.api_key = api_key or FRED_CONFIG.get('api_key') or os.getenv('FRED_API_KEY', '')
+        if not self.api_key:
+            logger.warning("FRED_API_KEY not configured — economic data endpoints will be limited")
         self.base_url = "https://api.stlouisfed.org/fred"
         self.timeout = 30
         self.rate_limit = 1200  # requests per day (free tier)
