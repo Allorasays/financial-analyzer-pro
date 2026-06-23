@@ -6,7 +6,7 @@
 
 #### 1. **NewsAPI** (Free Tier)
 - **Issue**: Free tier explicitly forbids production/commercial use and redistribution
-- **Current Key**: `7d3d96223d67427f80773dfa3fdf37b8`
+- **Current Key**: `YOUR_NEWSAPI_KEY`
 - **Options**:
   - **Option A**: Upgrade to NewsAPI Business Plan ($449/month) - allows commercial use
   - **Option B**: Replace with alternative (recommended for beta):
@@ -17,7 +17,7 @@
 
 #### 2. **Financial Modeling Prep (FMP)** (Free Tier)
 - **Issue**: Free tier likely prohibits commercial/public use
-- **Current Key**: `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve`
+- **Current Key**: `YOUR_FMP_API_KEY`
 - **Options**:
   - **Option A**: Upgrade to FMP Starter ($14/month) or Professional ($49/month)
   - **Option B**: Replace with:
@@ -32,7 +32,7 @@
   - Free tier license: **Internal use only - data may not be shared with another person or organization**
   - Data shown to app users = sharing data, which violates free tier terms
   - 500 requests/hour may not suffice for beta traffic
-- **Current Key**: `8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46`
+- **Current Key**: `YOUR_TIINGO_API_KEY`
 - **Current Status**: ✅ OK for internal/development use only
 - **For Beta/Public**: Must upgrade to paid tier that allows redistribution
 - **Recommendation**: 
@@ -52,7 +52,7 @@
 
 #### 5. **FRED API** (Federal Reserve Economic Data)
 - **Status**: ✅ Safe - Government data, free for public use
-- **Key**: `9371fbb0a2b505b3262b5578f44016c5`
+- **Key**: `YOUR_FRED_API_KEY`
 - **No action needed**
 
 #### 6. **Yahoo Finance** (via yfinance)

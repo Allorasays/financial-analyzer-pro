@@ -140,7 +140,7 @@ The backend endpoint returns 80+ financial metrics including:
 2. **Verify FMP_API_KEY:**
    - Go to Render Dashboard → `moneta-backend-api` → Environment
    - Check `FMP_API_KEY` is set
-   - Value: `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve` (or your own key)
+   - Value: `YOUR_FMP_API_KEY` (or your own key)
 
 3. **Check App Logs:**
    - In Android Studio: View → Tool Windows → Logcat
@@ -176,5 +176,10 @@ The backend endpoint returns 80+ financial metrics including:
 ✅ **Provides consistent, reliable financial data**
 
 **Rebuild the app in Android Studio to see the improvements!** 🚀
+
+
+
+
+
 
 

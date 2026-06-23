@@ -28,7 +28,7 @@ NVDA: $181.16
 - **Company Info**: Apple Inc retrieved successfully
 - **Stock Prices**: Real-time data available
 - **Rate Limits**: 998/1000 requests remaining today
-- **API Key**: `8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46`
+- **API Key**: `YOUR_TIINGO_API_KEY`
 
 ---
 

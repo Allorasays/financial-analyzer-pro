@@ -31,7 +31,7 @@ IEX Cloud officially retired all its API services on August 31, 2024. We need to
 - **Current**: Free tier (5 requests/minute)
 - **Upgrade**: Premium ($49.99/month)
 - **Benefits**: 1,200 requests/minute, real-time data
-- **Note**: Already have key `C04TV0QS7GVJF0RU`
+- **Note**: Already have key `YOUR_ALPHAVANTAGE_API_KEY`
 
 ## 💰 **Cost Analysis**
 

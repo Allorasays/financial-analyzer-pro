@@ -3,7 +3,7 @@
 ## ✅ **What We've Accomplished**
 
 ### **🔑 API Key Integration**
-- **API Key**: `8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46`
+- **API Key**: `YOUR_TIINGO_API_KEY`
 - **Provider**: Tiingo API (IEX Cloud Replacement)
 - **Status**: ✅ **ACTIVE & WORKING**
 

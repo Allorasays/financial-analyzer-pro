@@ -1,8 +1,11 @@
 """
 API Fallback Strategy
-Handles API failures and provides alternative data sources
+Handles API failures and provides alternative data sources for price/history flows.
+
+For comprehensive financial metrics, use comprehensive_financial_aggregator.py instead.
 """
 
+import os
 import requests
 import time
 import logging
@@ -31,7 +34,7 @@ class APIFallbackStrategy:
             'alpha_vantage': True,
             'tiingo': True,
             'fred': True,
-            'fmp': False  # Currently disabled due to legacy endpoint issues
+            'fmp': bool(os.getenv('FMP_API_KEY')),
         }
     
     def _check_rate_limit(self, api_name: str) -> bool:
@@ -112,8 +115,9 @@ class APIFallbackStrategy:
             try:
                 self._check_rate_limit('alpha_vantage')
                 
-                # Alpha Vantage API call
-                api_key = 'C04TV0QS7GVJF0RU'
+                api_key = os.getenv('ALPHAVANTAGE_API_KEY', '')
+                if not api_key:
+                    raise ValueError("ALPHAVANTAGE_API_KEY not configured")
                 url = f'https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol={ticker}&apikey={api_key}&outputsize=full'
                 
                 response = requests.get(url, timeout=30)

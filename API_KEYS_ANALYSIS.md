@@ -3,7 +3,7 @@
 ## 📊 **Currently Active API Keys**
 
 ### ✅ **1. NewsAPI** 
-- **Key**: `7d3d96223d67427f80773dfa3fdf37b8`
+- **Key**: `YOUR_NEWSAPI_KEY`
 - **Tier**: Free Tier
 - **Limits**: 1,000 requests/day, 50 requests/hour
 - **Status**: ✅ **ACTIVE & WORKING**
@@ -11,7 +11,7 @@
 - **Coverage**: Bloomberg, Reuters, CNBC, MarketWatch, Yahoo Finance, Financial Times, WSJ, Business Insider
 
 ### ✅ **2. Financial Modeling Prep (FMP)**
-- **Key**: `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve`
+- **Key**: `YOUR_FMP_API_KEY`
 - **Tier**: Free Tier
 - **Limits**: 250 requests/day
 - **Status**: ✅ **ACTIVE** (Android App)
@@ -19,7 +19,7 @@
 - **Endpoints**: `/api/v3/key-metrics/`, `/api/v3/ratios/`, `/api/v3/income-statement/`, `/api/v3/balance-sheet-statement/`
 
 ### ✅ **3. Alpha Vantage**
-- **Key**: `C04TV0QS7GVJF0RU`
+- **Key**: `YOUR_ALPHAVANTAGE_API_KEY`
 - **Tier**: Free Tier
 - **Limits**: 5 requests/minute, 500 requests/day
 - **Status**: ✅ **ACTIVE** (Android App)
@@ -27,7 +27,7 @@
 - **Endpoints**: `/query?function=OVERVIEW`, `/query?function=INCOME_STATEMENT`
 
 ### ✅ **4. Polygon.io**
-- **Key**: `gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm`
+- **Key**: `YOUR_POLYGON_API_KEY`
 - **Tier**: Free Tier
 - **Limits**: 5 requests/minute, 1,000 requests/day
 - **Status**: ✅ **ACTIVE** (Android App)
@@ -175,10 +175,10 @@
 ### **1. Environment Variables**
 ```bash
 # Add to .env file
-NEWSAPI_KEY=7d3d96223d67427f80773dfa3fdf37b8
+NEWSAPI_KEY=YOUR_NEWSAPI_KEY
 FMP_API_KEY=your_premium_key_here
-ALPHA_VANTAGE_KEY=C04TV0QS7GVJF0RU
-POLYGON_API_KEY=gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm
+ALPHA_VANTAGE_KEY=YOUR_ALPHAVANTAGE_API_KEY
+POLYGON_API_KEY=YOUR_POLYGON_API_KEY
 IEX_CLOUD_KEY=your_production_key_here
 FRED_API_KEY=your_fred_key_here
 QUANDL_API_KEY=your_quandl_key_here

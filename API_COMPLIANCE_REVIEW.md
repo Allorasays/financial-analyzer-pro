@@ -7,12 +7,12 @@
 | API Provider | API Key | Usage Type | Commercial Use | Compliance Status |
 |--------------|---------|------------|-----------------|-------------------|
 | **Yahoo Finance** | Free (yfinance) | Data scraping | ✅ Allowed | ✅ **COMPLIANT** |
-| **Tiingo** | `8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
-| **NewsAPI** | `7d3d96223d67427f80773dfa3fdf37b8` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
-| **FRED** | `9371fbb0a2b505b3262b5578f44016c5` | Free tier | ✅ Allowed | ⚠️ **REVIEW NEEDED** |
-| **Alpha Vantage** | `C04TV0QS7GVJF0RU` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
-| **Polygon.io** | `gqvp07BQCfnH7Xq5p7GbbfAXLpvv7HTm` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
-| **FMP** | `R9F8nfYK9yGdmiq7I5ETw7e6EhTuG8ve` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
+| **Tiingo** | `YOUR_TIINGO_API_KEY` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
+| **NewsAPI** | `YOUR_NEWSAPI_KEY` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
+| **FRED** | `YOUR_FRED_API_KEY` | Free tier | ✅ Allowed | ⚠️ **REVIEW NEEDED** |
+| **Alpha Vantage** | `YOUR_ALPHAVANTAGE_API_KEY` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
+| **Polygon.io** | `YOUR_POLYGON_API_KEY` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
+| **FMP** | `YOUR_FMP_API_KEY` | Free tier | ✅ Allowed | ✅ **COMPLIANT** |
 
 ## ⚠️ **Critical Compliance Issues**
 
@@ -71,7 +71,7 @@ feature_columns = [
 ### **2. Secure API Key Storage**
 ```python
 # BEFORE (Insecure)
-TIINGO_API_KEY = '8c2e5b1e9d4a1cd31e1bb333d56232ddc382ee46'
+TIINGO_API_KEY = 'YOUR_TIINGO_API_KEY'
 
 # AFTER (Secure)
 TIINGO_API_KEY = os.getenv('TIINGO_API_KEY')
