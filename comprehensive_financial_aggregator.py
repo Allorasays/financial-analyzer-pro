@@ -436,9 +436,33 @@ class ComprehensiveFinancialAggregator:
             financial_data['data_source'] = 'yfinance'
             return financial_data
         except Exception as e:
-            logger.debug(f"yfinance data fetch failed for {ticker}: {e}")
+            err = str(e).lower()
+            if 'rate limit' in err or 'too many requests' in err:
+                logger.warning(f"yfinance rate limited for {ticker} — using other sources")
+            else:
+                logger.debug(f"yfinance data fetch failed for {ticker}: {e}")
             return {}
     
+    def _normalize_android_fields(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Align field names with Android FinancialDataResponse."""
+        aliases = {
+            'eps': 'earnings_per_share',
+            'diluted_eps': 'earnings_per_share',
+            'net_margin': 'profit_margin',
+            'cash_and_equivalents': 'total_cash',
+            'avg_volume': 'average_volume',
+            'year_high': '52_week_high',
+            'year_low': '52_week_low',
+            'price_change_percent': 'change_percent',
+            'trailing_pe': 'pe_ratio',
+        }
+        for src, dest in aliases.items():
+            if data.get(dest) is None and data.get(src) is not None:
+                data[dest] = data[src]
+        if data.get('earnings_per_share') is None and data.get('forward_eps') is not None:
+            data['earnings_per_share'] = data['forward_eps']
+        return data
+
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
         """
         Get comprehensive financial data by aggregating from ALL available sources.
@@ -460,14 +484,22 @@ class ComprehensiveFinancialAggregator:
             fmp_non_null = len([v for k, v in fmp_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
             logger.info(f"[Comprehensive Aggregator] FMP: {fmp_non_null} fields for {ticker}")
         
-        # Step 2: yfinance (optional enrichment; failures are non-fatal)
-        yf_data = self._get_yfinance_data(ticker)
-        if yf_data:
-            financial_data = self._merge_data(financial_data, yf_data)
-            if 'yfinance' not in financial_data['data_sources']:
-                financial_data['data_sources'].append('yfinance')
-            yf_non_null = len([v for k, v in yf_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
-            logger.info(f"[Comprehensive Aggregator] yfinance: {yf_non_null} fields for {ticker}")
+        # Step 2: yfinance only if FMP did not supply enough statement-level fields
+        fmp_field_count = len([
+            v for k, v in financial_data.items()
+            if k in ('revenue', 'net_income', 'gross_margin', 'operating_cash_flow', 'total_debt')
+            and v is not None
+        ])
+        if fmp_field_count < 3:
+            yf_data = self._get_yfinance_data(ticker)
+            if yf_data:
+                financial_data = self._merge_data(financial_data, yf_data)
+                if 'yfinance' not in financial_data['data_sources']:
+                    financial_data['data_sources'].append('yfinance')
+                yf_non_null = len([v for k, v in yf_data.items() if k not in ['data_source', 'timestamp', 'ticker'] and v is not None])
+                logger.info(f"[Comprehensive Aggregator] yfinance: {yf_non_null} fields for {ticker}")
+        else:
+            logger.info(f"[Comprehensive Aggregator] Skipping yfinance for {ticker} — FMP has statement data")
         
         # Step 3: Add Alpha Vantage data (good financial statements)
         av_data = self._get_alpha_vantage_data(ticker)
@@ -508,8 +540,8 @@ class ComprehensiveFinancialAggregator:
         sample_data = {k: financial_data.get(k) for k in key_fields if financial_data.get(k) is not None}
         if sample_data:
             logger.info(f"[Comprehensive Aggregator] Sample fields for {ticker}: {list(sample_data.keys())}")
-        
-        return financial_data
+
+        return self._normalize_android_fields(financial_data)
 
 
 # Global instance
