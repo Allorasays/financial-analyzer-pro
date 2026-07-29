@@ -243,6 +243,26 @@ def _fundamental_long_score(financials: Dict[str, Any], growth: Dict[str, Any]) 
     return _clamp(score), drivers, risks
 
 
+def _macro_adjustment(fred_data: Optional[Dict[str, Any]]) -> Tuple[float, List[str]]:
+    if not fred_data:
+        return 0.0, []
+    notes: List[str] = []
+    delta = 0.0
+    vix = _safe_float(fred_data.get("vix"))
+    if vix is not None:
+        if vix >= 30:
+            delta -= 6
+            notes.append(f"Elevated VIX ({vix:.1f}) — risk-off")
+        elif vix <= 15:
+            delta += 3
+            notes.append(f"Calm VIX ({vix:.1f}) — risk-on bias")
+    unemp = _safe_float(fred_data.get("unemployment_rate"))
+    if unemp is not None and unemp >= 5.5:
+        delta -= 2
+        notes.append(f"Unemployment elevated ({unemp:.1f}%)")
+    return delta, notes
+
+
 def _bucket(short: Dict[str, Any], long: Dict[str, Any]) -> str:
     s, l = short["score"], long["score"]
     if l < 30 or (l < 35 and str(long.get("outlook", "")).startswith("Negative")):
@@ -267,6 +287,10 @@ def build_investability_report(
     risk: Optional[Dict[str, Any]] = None,
     growth: Optional[Dict[str, Any]] = None,
     financials: Optional[Dict[str, Any]] = None,
+    macro: Optional[Dict[str, Any]] = None,
+    peers: Optional[Dict[str, Any]] = None,
+    ml_accuracy: Optional[Dict[str, Any]] = None,
+    alt_data: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build dual-horizon investability report.
@@ -280,6 +304,9 @@ def build_investability_report(
     risk = risk or {}
     growth = growth or {}
     financials = financials or {}
+    macro = macro or {}
+    peers = peers or {}
+    alt_data = alt_data or {}
 
     current = _safe_float(ml.get("current_price")) or _safe_float(financials.get("current_price"))
     conf = _safe_float(ml.get("confidence_score"), 0.5)
@@ -311,7 +338,7 @@ def build_investability_report(
     short_conf = _clamp(
         (
             (conf or 0.5) * 0.5
-            + (_safe_float(sentiment.get("confidence"), 0.5) or 0.5) * 0.3
+            + (_safe_float(sentiment.get("confidence"), _safe_float(sentiment.get("confidence_score"), 0.5)) or 0.5) * 0.3
             + (0.7 if technical.get("indicators") else 0.4) * 0.2
         )
         * 100,
@@ -353,16 +380,53 @@ def build_investability_report(
         fund_score * 0.35
         + ml_long * 0.25
         + risk_safe * 0.20
-        + tech_score * 0.10  # trend persistence proxy
+        + tech_score * 0.10
         + sent_score * 0.10
     )
-    # Extra penalty for weak fundamentals + high risk
     if fund_score < 40 and risk_safe < 40:
         long_raw -= 8
 
+    # Peer-relative fundamentals (Phase 4)
+    peer_notes: List[str] = []
+    peer_list = peers.get("peers") if isinstance(peers.get("peers"), list) else []
+    my_pe = _safe_float(financials.get("pe_ratio"))
+    peer_pes = [
+        _safe_float(p.get("pe_ratio") or p.get("pe"))
+        for p in peer_list
+        if isinstance(p, dict)
+    ]
+    peer_pes = [p for p in peer_pes if p is not None and p > 0]
+    if my_pe and peer_pes:
+        peer_avg = sum(peer_pes) / len(peer_pes)
+        if my_pe < peer_avg * 0.85:
+            long_raw += 4
+            peer_notes.append(f"P/E below peer avg ({my_pe:.1f} vs {peer_avg:.1f})")
+        elif my_pe > peer_avg * 1.25:
+            long_raw -= 4
+            peer_notes.append(f"P/E above peer avg ({my_pe:.1f} vs {peer_avg:.1f})")
+
+    # Macro overlay
+    macro_delta, macro_notes = _macro_adjustment(macro)
+    short_block["score"] = _clamp(short_block["score"] + macro_delta * 0.5)
+    short_block["outlook"] = _outlook_from_score(short_block["score"])
+    if macro_notes:
+        short_block["drivers"] = (short_block["drivers"] + macro_notes)[:6]
+    long_raw += macro_delta * 0.35
+
+    # Alt-data avoid penalties (insider selling / weak institutional)
+    alt_risks: List[str] = []
+    insider = alt_data.get("insider_transactions") if isinstance(alt_data.get("insider_transactions"), dict) else {}
+    if insider.get("net_sentiment") == "bearish" or insider.get("signal") == "selling":
+        long_raw -= 5
+        alt_risks.append("Insider selling pressure flagged")
+    holdings = alt_data.get("institutional_holdings") if isinstance(alt_data.get("institutional_holdings"), dict) else {}
+    if holdings.get("trend") == "decreasing":
+        long_raw -= 3
+        alt_risks.append("Institutional holdings trending down")
+
     long_score = _clamp(long_raw)
-    long_drivers = (fund_drivers + month_drivers + quarter_drivers)[:6]
-    long_risks = (fund_risks + risk_notes)[:5]
+    long_drivers = (fund_drivers + month_drivers + quarter_drivers + peer_notes + macro_notes)[:6]
+    long_risks = (fund_risks + risk_notes + alt_risks)[:5]
     long_conf = _clamp(
         (
             (0.75 if financials.get("revenue") is not None else 0.4) * 0.45
@@ -373,6 +437,17 @@ def build_investability_report(
         0,
         100,
     )
+
+    # ML historical accuracy dampens confidence when known weak
+    if ml_accuracy and isinstance(ml_accuracy, dict):
+        dir_acc = _safe_float(ml_accuracy.get("direction_accuracy_pct") or ml_accuracy.get("direction_accuracy"))
+        if dir_acc is not None:
+            if dir_acc <= 1.0:
+                dir_acc = dir_acc * 100
+            if dir_acc < 50:
+                short_block["confidence"] = _clamp(short_block["confidence"] * 0.85)
+                long_conf = _clamp(long_conf * 0.85)
+                short_block["risks"] = (short_block["risks"] + [f"ML direction accuracy low ({dir_acc:.0f}%)"])[:5]
 
     long_block = {
         "horizon": "long_term",
@@ -411,8 +486,10 @@ def build_investability_report(
         data_gaps.append("Sentiment unavailable")
     if not risk:
         data_gaps.append("Risk assessment unavailable")
+    if not peer_list:
+        data_gaps.append("Peer set incomplete")
 
-    return {
+    result = {
         "ticker": ticker.upper(),
         "timestamp": datetime.now().isoformat(),
         "current_price": current,
@@ -420,6 +497,11 @@ def build_investability_report(
         "long_term": long_block,
         "recommendation_bucket": recommendation_bucket,
         "recommendation_label": bucket_labels.get(recommendation_bucket, "Hold"),
+        "peers": {
+            "tickers": [p.get("ticker") for p in peer_list if isinstance(p, dict) and p.get("ticker")][:8],
+            "count": len(peer_list),
+            "notes": peer_notes,
+        },
         "data_gaps": data_gaps,
         "disclaimer": (
             "Personal research score only — not investment advice. "
@@ -427,3 +509,8 @@ def build_investability_report(
         ),
         "personal_use_only": True,
     }
+    if ml_accuracy:
+        result["ml_accuracy"] = ml_accuracy
+    if macro_notes:
+        result["macro_notes"] = macro_notes
+    return result

@@ -37,7 +37,8 @@ def main():
     
     results = {
         'predictions': None,
-        'validations': None
+        'validations': None,
+        'screener': None,
     }
     
     # Step 1: Make new predictions
@@ -61,6 +62,23 @@ def main():
     except Exception as e:
         logger.error(f"✗ Validation step failed: {e}", exc_info=True)
         results['validations'] = {'status': 'error', 'error': str(e)}
+
+    # Step 3: Refresh investability screener rankings
+    logger.info("\n" + "=" * 80)
+    logger.info("STEP 3: SCREENER REFRESH")
+    logger.info("=" * 80)
+    try:
+        from screener_daily_job import run_screener_refresh
+        results['screener'] = run_screener_refresh(
+            universe=os.getenv('SCREENER_UNIVERSE', 'core'),
+            limit=int(os.getenv('SCREENER_LIMIT', '25')),
+            top_n=int(os.getenv('SCREENER_TOP_N', '10')),
+            mode=os.getenv('SCREENER_MODE', 'lite'),
+        )
+        logger.info(f"✓ Screener scored {results['screener'].get('scored', 0)} tickers")
+    except Exception as e:
+        logger.error(f"✗ Screener step failed: {e}", exc_info=True)
+        results['screener'] = {'status': 'error', 'error': str(e)}
     
     # Summary
     logger.info("\n" + "=" * 80)
@@ -79,6 +97,10 @@ def main():
             direction_correct = sum(1 for v in val['validations'] if v.get('direction_correct', False))
             direction_accuracy = (direction_correct / len(val['validations'])) * 100 if val['validations'] else 0
             logger.info(f"Direction Accuracy: {direction_accuracy:.1f}%")
+
+    if results.get('screener'):
+        scr = results['screener']
+        logger.info(f"Screener: scored={scr.get('scored', 0)} elapsed={scr.get('elapsed_seconds')}s")
     
     logger.info("=" * 80)
     logger.info("Daily job complete!")

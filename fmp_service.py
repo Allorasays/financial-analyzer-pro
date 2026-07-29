@@ -6,7 +6,7 @@ Provides comprehensive financial data including income statements, balance sheet
 import requests
 import os
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -102,6 +102,54 @@ class FMPService:
         data = self._make_request("quote", {'symbol': ticker})
         return data[0] if data and len(data) > 0 else None
 
+    def get_stock_peers(self, ticker: str) -> List[str]:
+        """Return peer ticker symbols from FMP (best-effort across endpoint shapes)."""
+        for endpoint, params in (
+            ("stock-peers", {"symbol": ticker}),
+            ("peers", {"symbol": ticker}),
+        ):
+            data = self._make_request(endpoint, params)
+            if not data:
+                continue
+            # Shapes: [{"symbol":"AAPL","peersList":[...]}] or ["MSFT","GOOGL"] or {"peersList":[...]}
+            if isinstance(data, list):
+                if data and isinstance(data[0], str):
+                    return [str(x).upper() for x in data if x]
+                if data and isinstance(data[0], dict):
+                    peers = data[0].get("peersList") or data[0].get("peers") or []
+                    if isinstance(peers, str):
+                        peers = [p.strip() for p in peers.split(",") if p.strip()]
+                    if peers:
+                        return [str(x).upper() for x in peers if x]
+                    # list of peer objects
+                    syms = [d.get("symbol") for d in data if isinstance(d, dict) and d.get("symbol")]
+                    if syms and ticker.upper() not in syms:
+                        return [str(s).upper() for s in syms]
+                    return [str(s).upper() for s in syms if str(s).upper() != ticker.upper()]
+            if isinstance(data, dict):
+                peers = data.get("peersList") or data.get("peers") or []
+                if isinstance(peers, str):
+                    peers = [p.strip() for p in peers.split(",") if p.strip()]
+                if peers:
+                    return [str(x).upper() for x in peers if x]
+        return []
+
+    def get_peer_snapshots(self, ticker: str, max_peers: int = 6) -> Dict[str, Any]:
+        """Peer tickers plus lightweight quote snapshots for relative valuation."""
+        symbols = [s for s in self.get_stock_peers(ticker) if s != ticker.upper()][:max_peers]
+        peers = []
+        for sym in symbols:
+            q = self.get_quote(sym) or {}
+            peers.append({
+                "ticker": sym,
+                "price": q.get("price"),
+                "pe_ratio": q.get("pe"),
+                "market_cap": q.get("marketCap"),
+                "change_percent": q.get("changesPercentage") or q.get("changePercentage"),
+                "company_name": q.get("name"),
+            })
+        return {"ticker": ticker.upper(), "peers": peers, "peer_symbols": symbols}
+
     def _normalize_field_names(self, financial_data: Dict[str, Any]) -> Dict[str, Any]:
         """Map FMP field names to backend/Android FinancialDataResponse keys."""
         aliases = {
@@ -188,6 +236,7 @@ class FMPService:
             if ratios:
                 financial_data.update({
                     'pe_ratio': ratios.get('priceToEarningsRatio') or financial_data.get('pe_ratio'),
+                    'earnings_per_share': ratios.get('netIncomePerShare') or financial_data.get('earnings_per_share'),
                     'current_ratio': ratios.get('currentRatio'),
                     'quick_ratio': ratios.get('quickRatio'),
                     'debt_to_equity': ratios.get('debtEquityRatio'),

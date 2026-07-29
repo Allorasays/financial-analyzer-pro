@@ -46,6 +46,8 @@ from fmp_service import fmp_service
 from comprehensive_financial_aggregator import comprehensive_financial_aggregator
 from config import PERSONAL_USE_CONFIG
 from investability_service import build_investability_report
+from screener_service import ScreenerEngine, SCREENER_CACHE_TYPE
+from screener_universe import UNIVERSES
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -3208,19 +3210,27 @@ async def get_financial_metrics(ticker: str):
 
 @app.get("/api/peers/{ticker}")
 async def get_peer_comparison(ticker: str):
-    """Get comprehensive peer comparison data"""
+    """Peer tickers (FMP) plus relative valuation snapshots; yfinance industry stats as fallback."""
+    symbol = ticker.upper()
+    peers_payload: Dict[str, Any] = {"ticker": symbol, "peers": [], "peer_symbols": []}
     try:
-        stock = yf.Ticker(ticker)
-        info = stock.info
-        
+        if fmp_service.enabled:
+            peers_payload = fmp_service.get_peer_snapshots(symbol) or peers_payload
+    except Exception as e:
+        print(f"[Peers] FMP peers failed for {symbol}: {e}")
+
+    industry_stats: Dict[str, Any] = {}
+    try:
+        stock = yf.Ticker(symbol)
+        info = stock.info or {}
+
         def safe_get(key, default=None):
             value = info.get(key, default)
             if value == 0 or value == '' or value is None:
                 return None
             return value
-        
-        return {
-            "ticker": ticker.upper(),
+
+        industry_stats = {
             "industry": info.get('industry') or None,
             "sector": info.get('sector') or None,
             "industry_average_pe": safe_get('trailingPE'),
@@ -3238,10 +3248,173 @@ async def get_peer_comparison(ticker: str):
             "industry_price_to_sales": safe_get('priceToSalesTrailing12Months'),
             "industry_dividend_yield": safe_get('dividendYield'),
             "industry_beta": safe_get('beta'),
-            "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching peer comparison: {str(e)}")
+        print(f"[Peers] yfinance industry stats failed for {symbol}: {e}")
+
+    return {
+        **industry_stats,
+        "ticker": symbol,
+        "peers": peers_payload.get("peers") or [],
+        "peer_symbols": peers_payload.get("peer_symbols") or [],
+        "peer_count": len(peers_payload.get("peers") or []),
+        "timestamp": datetime.now().isoformat(),
+        "personal_use_only": PERSONAL_USE_CONFIG.get("enabled", True),
+    }
+
+
+class ScreenerRunRequest(BaseModel):
+    universe: str = "core"
+    tickers: Optional[List[str]] = None
+    limit: Optional[int] = None
+    top_n: int = 10
+    mode: str = "lite"  # lite | full
+
+
+class PersonalizeScoreRequest(BaseModel):
+    tickers: List[str]
+    top_n: int = 20
+    mode: str = "lite"
+
+
+def _screener_persist(key: str, payload: Dict[str, Any]) -> None:
+    ttl_min = max(30, int(os.getenv("SCREENER_CACHE_TTL_MINUTES", "360")))
+    db_manager.cache_market_data(key, SCREENER_CACHE_TYPE, json.dumps(payload), cache_duration_minutes=ttl_min)
+
+
+def _screener_load(key: str) -> Optional[Dict[str, Any]]:
+    data = db_manager.get_cached_market_data(key, SCREENER_CACHE_TYPE)
+    if data:
+        return data
+    return db_manager.get_cached_market_data_stale(key, SCREENER_CACHE_TYPE)
+
+
+def _get_screener_engine() -> ScreenerEngine:
+    def _macro():
+        try:
+            from fred_indicators import get_fred_indicators
+            return get_fred_indicators() or {}
+        except Exception:
+            return {}
+
+    def _accuracy(ticker=None):
+        try:
+            metrics = prediction_tracker.calculate_accuracy_metrics(ticker=ticker)
+            if metrics and metrics.get("status") != "insufficient_data":
+                return metrics
+            return prediction_tracker.calculate_accuracy_metrics()
+        except Exception:
+            return {}
+
+    return ScreenerEngine(
+        fmp_service=fmp_service,
+        get_macro=_macro,
+        get_ml_accuracy=_accuracy,
+        persist=_screener_persist,
+        load_persisted=_screener_load,
+    )
+
+
+@app.get("/api/screener/universes")
+async def list_screener_universes():
+    return {
+        "universes": {k: len(v) for k, v in UNIVERSES.items()},
+        "default": "core",
+        "personal_use_only": True,
+    }
+
+
+@app.get("/api/screener/results")
+async def get_screener_results():
+    """Latest cached screener rankings (from last run or nightly job)."""
+    engine = _get_screener_engine()
+    latest = engine.latest()
+    if not latest:
+        raise HTTPException(status_code=404, detail="No screener results cached yet. POST /api/screener/run first.")
+    latest = dict(latest)
+    latest["cached"] = True
+    return latest
+
+
+@app.post("/api/screener/run")
+async def run_screener_post(body: ScreenerRunRequest):
+    return await _execute_screener(
+        universe=body.universe,
+        tickers=body.tickers,
+        limit=body.limit,
+        top_n=body.top_n,
+        mode=body.mode,
+    )
+
+
+@app.get("/api/screener/run")
+async def run_screener_get(
+    universe: str = "core",
+    limit: Optional[int] = 25,
+    top_n: int = 10,
+    mode: str = "lite",
+):
+    return await _execute_screener(universe=universe, tickers=None, limit=limit, top_n=top_n, mode=mode)
+
+
+async def _execute_screener(
+    *,
+    universe: str = "core",
+    tickers: Optional[List[str]] = None,
+    limit: Optional[int] = 25,
+    top_n: int = 10,
+    mode: str = "lite",
+):
+    """
+    Scan a liquid universe and rank short-term / long-term / avoid_long candidates.
+    Prefer mode=lite on free tiers. Results are persisted for GET /api/screener/results.
+    """
+    max_scan = int(os.getenv("SCREENER_MAX_TICKERS", "40"))
+    if limit is None:
+        limit = min(25, max_scan)
+    else:
+        limit = min(int(limit), max_scan)
+
+    engine = _get_screener_engine()
+    try:
+        result = engine.run(
+            universe=universe,
+            tickers=tickers,
+            limit=limit,
+            top_n=min(int(top_n), 25),
+            mode=("full" if str(mode).lower() == "full" else "lite"),
+            max_workers=int(os.getenv("SCREENER_MAX_WORKERS", "3")),
+        )
+        response = {k: v for k, v in result.items() if k != "results"}
+        response["results_available"] = result.get("scored", 0)
+        return _attach_personal_use_metadata(response, cached=False)
+    except Exception as e:
+        print(f"[Screener] run failed: {e}")
+        raise HTTPException(status_code=503, detail=f"Screener unavailable: {e}")
+
+
+@app.post("/api/screener/personalize")
+async def personalize_screener(body: PersonalizeScoreRequest):
+    """Score watchlist/portfolio tickers and return ranked short/long/avoid lists."""
+    tickers = [t.strip().upper() for t in (body.tickers or []) if t and str(t).strip()]
+    if not tickers:
+        raise HTTPException(status_code=400, detail="tickers required")
+    tickers = tickers[:40]
+    engine = _get_screener_engine()
+    result = engine.score_tickers(tickers, mode=("full" if body.mode == "full" else "lite"), top_n=body.top_n)
+    response = {k: v for k, v in result.items() if k != "results"}
+    response["source"] = "personalize"
+    return _attach_personal_use_metadata(response, cached=False)
+
+
+@app.get("/api/ai/screener/results")
+async def get_screener_results_ai_alias():
+    return await get_screener_results()
+
+
+@app.get("/api/ai/screener/run")
+async def run_screener_ai_alias(universe: str = "core", limit: int = 25, top_n: int = 10, mode: str = "lite"):
+    return await run_screener_get(universe=universe, limit=limit, top_n=top_n, mode=mode)
 
 @app.get("/api/ai/technical-analysis/{ticker}")
 async def get_advanced_technical_analysis(ticker: str):
@@ -3697,6 +3870,7 @@ async def get_investability(ticker: str, horizon: str = "both"):
         technical = _safe_call("technical", get_technical_indicators, symbol, "1y")
         sentiment = _safe_call("sentiment", get_sentiment_analysis, symbol)
 
+        # Reuse existing FastAPI handlers where practical
         try:
             risk = await get_risk_assessment(symbol)
             if not isinstance(risk, dict):
@@ -3721,6 +3895,38 @@ async def get_investability(ticker: str, horizon: str = "both"):
             print(f"[Investability] financials failed for {symbol}: {e}")
             financials = {}
 
+        macro = {}
+        try:
+            from fred_indicators import get_fred_indicators
+            macro = get_fred_indicators() or {}
+        except Exception as e:
+            print(f"[Investability] macro failed for {symbol}: {e}")
+
+        peers = {}
+        try:
+            if fmp_service.enabled:
+                peers = fmp_service.get_peer_snapshots(symbol) or {}
+        except Exception as e:
+            print(f"[Investability] peers failed for {symbol}: {e}")
+
+        ml_accuracy = {}
+        try:
+            ml_accuracy = prediction_tracker.calculate_accuracy_metrics(ticker=symbol) or {}
+            if ml_accuracy.get("status") == "insufficient_data":
+                ml_accuracy = prediction_tracker.calculate_accuracy_metrics() or {}
+        except Exception as e:
+            print(f"[Investability] ml_accuracy failed: {e}")
+
+        alt_data = {}
+        try:
+            if ALTERNATIVE_DATA_AVAILABLE:
+                alt_data = {
+                    "insider_transactions": get_insider_transactions(symbol) or {},
+                    "institutional_holdings": get_institutional_holdings(symbol) or {},
+                }
+        except Exception as e:
+            print(f"[Investability] alt_data failed: {e}")
+
         report = build_investability_report(
             symbol,
             ml=ml,
@@ -3729,6 +3935,10 @@ async def get_investability(ticker: str, horizon: str = "both"):
             risk=risk,
             growth=growth,
             financials=financials,
+            macro=macro,
+            peers=peers,
+            ml_accuracy=ml_accuracy if isinstance(ml_accuracy, dict) else {},
+            alt_data=alt_data,
         )
         report["cached"] = False
         report = _attach_personal_use_metadata(report, cached=False)
