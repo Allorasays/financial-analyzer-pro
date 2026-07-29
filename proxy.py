@@ -45,6 +45,7 @@ from prediction_validator import prediction_validator
 from fmp_service import fmp_service
 from comprehensive_financial_aggregator import comprehensive_financial_aggregator
 from config import PERSONAL_USE_CONFIG
+from investability_service import build_investability_report
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -3653,6 +3654,113 @@ async def batch_market_data_alias(tickers: str = Query(..., description="Comma-s
                 "error": str(e)
             }
         )
+
+_investability_cache: Dict[str, Dict[str, Any]] = {}
+_investability_cache_lock = threading.Lock()
+_INVESTABILITY_TTL = int(os.getenv("INVESTABILITY_CACHE_TTL_SECONDS", "900"))
+
+
+def _safe_call(label: str, fn, *args, **kwargs) -> Dict[str, Any]:
+    try:
+        result = fn(*args, **kwargs)
+        return result if isinstance(result, dict) else {}
+    except Exception as e:
+        print(f"[Investability] {label} failed for args={args}: {e}")
+        return {}
+
+
+@app.get("/api/investability/{ticker}")
+async def get_investability(ticker: str, horizon: str = "both"):
+    """
+    Dual-horizon investability report (personal research only).
+
+    Composes ML, technical, sentiment, risk, growth, and financials into
+    short_term / long_term scores with drivers, risks, and a recommendation bucket.
+    """
+    symbol = ticker.upper().strip()
+    horizon = (horizon or "both").lower()
+    now = time.time()
+
+    with _investability_cache_lock:
+        cached = _investability_cache.get(symbol)
+        if cached and (now - cached["ts"]) < _INVESTABILITY_TTL:
+            payload = dict(cached["data"])
+            payload["cached"] = True
+            if horizon == "short":
+                payload.pop("long_term", None)
+            elif horizon == "long":
+                payload.pop("short_term", None)
+            return payload
+
+    try:
+        ml = _safe_call("ml", get_ml_predictions, symbol, 30)
+        technical = _safe_call("technical", get_technical_indicators, symbol, "1y")
+        sentiment = _safe_call("sentiment", get_sentiment_analysis, symbol)
+
+        try:
+            risk = await get_risk_assessment(symbol)
+            if not isinstance(risk, dict):
+                risk = {}
+        except Exception as e:
+            print(f"[Investability] risk failed for {symbol}: {e}")
+            risk = {}
+
+        try:
+            growth = await get_growth_analysis(symbol)
+            if not isinstance(growth, dict):
+                growth = {}
+        except Exception as e:
+            print(f"[Investability] growth failed for {symbol}: {e}")
+            growth = {}
+
+        try:
+            financials = await get_financial_metrics(symbol)
+            if not isinstance(financials, dict):
+                financials = {}
+        except Exception as e:
+            print(f"[Investability] financials failed for {symbol}: {e}")
+            financials = {}
+
+        report = build_investability_report(
+            symbol,
+            ml=ml,
+            technical=technical,
+            sentiment=sentiment if isinstance(sentiment, dict) else {},
+            risk=risk,
+            growth=growth,
+            financials=financials,
+        )
+        report["cached"] = False
+        report = _attach_personal_use_metadata(report, cached=False)
+
+        with _investability_cache_lock:
+            _investability_cache[symbol] = {"ts": now, "data": dict(report)}
+
+        if horizon == "short":
+            report = {k: v for k, v in report.items() if k != "long_term"}
+        elif horizon == "long":
+            report = {k: v for k, v in report.items() if k != "short_term"}
+
+        print(
+            f"[Investability] {symbol}: short={report.get('short_term', {}).get('score')} "
+            f"long={report.get('long_term', {}).get('score')} "
+            f"bucket={report.get('recommendation_bucket')}"
+        )
+        return report
+
+    except Exception as e:
+        print(f"[Investability] error for {symbol}: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Investability report temporarily unavailable: {str(e)}",
+        )
+
+
+@app.get("/api/ai/investability/{ticker}")
+async def get_investability_ai_alias(ticker: str, horizon: str = "both"):
+    """Android-friendly alias for /api/investability/{ticker}."""
+    return await get_investability(ticker, horizon=horizon)
+
 
 @app.get("/api/ai/comprehensive-analysis/{ticker}")
 async def get_comprehensive_analysis(ticker: str, prediction_days: int = 30):
