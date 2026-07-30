@@ -3149,20 +3149,21 @@ def format_sentiment_for_android(ticker: str, raw: Dict[str, Any]) -> Dict[str, 
 
 
 @app.get("/api/financials/{ticker}")
-async def get_financial_metrics(ticker: str):
+async def get_financial_metrics(ticker: str, refresh: bool = False):
     """Comprehensive financial metrics for personal use. Uses multi-source aggregator with cache."""
     symbol = ticker.upper()
     ttl = PERSONAL_USE_CONFIG['financials_cache_ttl']
     now = time.time()
 
-    cached_entry, _ = _financials_cache_read(symbol, ttl, now, allow_stale=False)
-    if cached_entry:
-        payload = dict(cached_entry['data'])
-        return _attach_personal_use_metadata(
-            payload,
-            cached=True,
-            cached_at=datetime.fromtimestamp(cached_entry['ts']).isoformat(),
-        )
+    if not refresh:
+        cached_entry, _ = _financials_cache_read(symbol, ttl, now, allow_stale=False)
+        if cached_entry:
+            payload = dict(cached_entry['data'])
+            return _attach_personal_use_metadata(
+                payload,
+                cached=True,
+                cached_at=datetime.fromtimestamp(cached_entry['ts']).isoformat(),
+            )
 
     try:
         financial_data = comprehensive_financial_aggregator.get_comprehensive_financial_data(symbol)

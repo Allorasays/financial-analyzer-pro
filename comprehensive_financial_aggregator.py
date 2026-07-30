@@ -455,6 +455,7 @@ class ComprehensiveFinancialAggregator:
             'year_low': '52_week_low',
             'price_change_percent': 'change_percent',
             'trailing_pe': 'pe_ratio',
+            'dividend_per_share': 'dividend_rate',
         }
         for src, dest in aliases.items():
             if data.get(dest) is None and data.get(src) is not None:
