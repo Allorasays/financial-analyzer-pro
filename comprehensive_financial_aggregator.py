@@ -542,6 +542,10 @@ class ComprehensiveFinancialAggregator:
         if sample_data:
             logger.info(f"[Comprehensive Aggregator] Sample fields for {ticker}: {list(sample_data.keys())}")
 
+        # Gson-safe: Android expects a string, not a JSON array
+        if isinstance(financial_data.get('data_sources'), list):
+            financial_data['data_sources'] = '+'.join(str(s) for s in financial_data['data_sources'] if s)
+
         return self._normalize_android_fields(financial_data)
 
 

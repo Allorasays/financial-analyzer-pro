@@ -235,6 +235,36 @@ class FMPService:
                 except (TypeError, ValueError, ZeroDivisionError):
                     pass
 
+        # Derived leverage / liquidity when ratio endpoints omit them
+        debt = financial_data.get("total_debt")
+        assets = financial_data.get("total_assets")
+        if financial_data.get("debt_to_assets") is None and debt is not None and assets:
+            try:
+                a = float(assets)
+                if a != 0:
+                    financial_data["debt_to_assets"] = float(debt) / a
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+
+        cash = financial_data.get("total_cash")
+        current_liab = financial_data.get("total_current_liabilities")
+        if financial_data.get("cash_ratio") is None and cash is not None and current_liab:
+            try:
+                cl = float(current_liab)
+                if cl != 0:
+                    financial_data["cash_ratio"] = float(cash) / cl
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+
+        equity = financial_data.get("total_equity")
+        if financial_data.get("debt_to_equity") is None and debt is not None and equity:
+            try:
+                e = float(equity)
+                if e != 0:
+                    financial_data["debt_to_equity"] = float(debt) / e
+            except (TypeError, ValueError, ZeroDivisionError):
+                pass
+
         return financial_data
 
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:

@@ -3088,8 +3088,22 @@ def _count_financial_fields(data: Dict[str, Any]) -> int:
     return len([v for k, v in data.items() if k not in skip and v is not None])
 
 
+def _normalize_android_financial_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep /api/financials JSON Gson-safe for Android FinancialDataResponse."""
+    # Android models data_sources as String?; a JSON array makes Gson fail the whole body.
+    ds = payload.get('data_sources')
+    if isinstance(ds, list):
+        payload['data_sources'] = '+'.join(str(x) for x in ds if x)
+    elif ds is not None and not isinstance(ds, str):
+        payload['data_sources'] = str(ds)
+    if not payload.get('data_source') and isinstance(payload.get('data_sources'), str):
+        payload['data_source'] = payload['data_sources']
+    return payload
+
+
 def _attach_personal_use_metadata(payload: Dict[str, Any], cached: bool = False,
                                   cached_at: Optional[str] = None) -> Dict[str, Any]:
+    payload = _normalize_android_financial_payload(dict(payload))
     payload['personal_use_only'] = PERSONAL_USE_CONFIG['enabled']
     payload['usage_notice'] = PERSONAL_USE_CONFIG['notice']
     payload['cached'] = cached
