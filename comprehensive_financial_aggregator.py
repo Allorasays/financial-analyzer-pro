@@ -456,12 +456,41 @@ class ComprehensiveFinancialAggregator:
             'price_change_percent': 'change_percent',
             'trailing_pe': 'pe_ratio',
             'dividend_per_share': 'dividend_rate',
+            'totalCurrentLiabilities': 'total_current_liabilities',
+            'current_liabilities': 'total_current_liabilities',
         }
         for src, dest in aliases.items():
             if data.get(dest) is None and data.get(src) is not None:
                 data[dest] = data[src]
         if data.get('earnings_per_share') is None and data.get('forward_eps') is not None:
             data['earnings_per_share'] = data['forward_eps']
+
+        def _f(key: str) -> Optional[float]:
+            try:
+                v = data.get(key)
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        debt = _f('total_debt')
+        assets = _f('total_assets')
+        equity = _f('total_equity')
+        cash = _f('total_cash')
+        current_liab = _f('total_current_liabilities')
+
+        if data.get('debt_to_assets') is None and debt is not None and assets and assets != 0:
+            data['debt_to_assets'] = debt / assets
+
+        if data.get('cash_ratio') is None and cash is not None and current_liab and current_liab != 0:
+            data['cash_ratio'] = cash / current_liab
+
+        # yfinance often reports D/E as percent (e.g. 79.5); recompute from statements when possible
+        de = _f('debt_to_equity')
+        if debt is not None and equity and equity != 0:
+            computed_de = debt / equity
+            if de is None or de > 10:
+                data['debt_to_equity'] = computed_de
+
         return data
 
     def get_comprehensive_financial_data(self, ticker: str) -> Dict[str, Any]:
