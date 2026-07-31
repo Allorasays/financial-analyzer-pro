@@ -33,7 +33,7 @@ from api_fallback_strategy import api_fallback
 from monitoring.ml_metrics_logger import log_prediction_metrics
 from volume_indicators import add_volume_indicators
 from market_correlation import calculate_market_metrics
-from sec_edgar_service import get_financial_metrics
+from sec_edgar_service import get_financial_metrics as sec_edgar_financial_metrics
 from support_resistance import add_support_resistance_features
 from drawdown_metrics import add_drawdown_features
 from fred_indicators import get_fred_indicators
@@ -1404,9 +1404,13 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         # Add SEC EDGAR Fundamental Data
         fundamental_data = {}
         try:
-            fundamental_data = get_financial_metrics(ticker)
+            fundamental_data = sec_edgar_financial_metrics(ticker)
+            # Guard against async mishandling returning a coroutine
+            if hasattr(fundamental_data, '__await__'):
+                print(f"[WARNING] SEC EDGAR returned coroutine for {ticker}; skipping fundamentals")
+                fundamental_data = {}
             # Add fundamental features as constants (same for all rows)
-            if fundamental_data:
+            if fundamental_data and isinstance(fundamental_data, dict):
                 df['Revenue_Growth'] = fundamental_data.get('revenue_growth', np.nan)
                 df['Profit_Margin'] = fundamental_data.get('profit_margin', np.nan)
                 df['Debt_to_Assets'] = fundamental_data.get('debt_to_assets', np.nan)
@@ -1416,6 +1420,7 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 if 'net_income' in fundamental_data and fundamental_data.get('net_income'):
                     df['Net_Income_Per_Share'] = fundamental_data['net_income'] / 1000000  # Scale to millions
             else:
+                fundamental_data = {}
                 df['Revenue_Growth'] = np.nan
                 df['Profit_Margin'] = np.nan
                 df['Debt_to_Assets'] = np.nan
@@ -1423,6 +1428,7 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 df['Net_Income_Per_Share'] = np.nan
         except Exception as e:
             print(f"[WARNING] Error fetching SEC EDGAR data: {e}")
+            fundamental_data = {}
             df['Revenue_Growth'] = np.nan
             df['Profit_Margin'] = np.nan
             df['Debt_to_Assets'] = np.nan
@@ -1532,11 +1538,17 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             for i in range(1, 6):
                 df[f'Close_Lag_{i}'] = df['Close'].shift(i)
                 df[f'Volume_Lag_{i}'] = df['Volume'].shift(i)
+                df[f'Returns_Lag_{i}'] = df['Returns'].shift(i)
         except Exception as e:
             raise Exception(f"Error creating lag features: {str(e)}")
         
-        # Drop NaN values
-        df = df.dropna()
+        # Trust: do not drop the whole frame when optional sources (FRED/SEC/news) are NaN
+        df = df.dropna(axis=1, how='all')
+        core_cols = [c for c in ('Close', 'Volume', 'Returns', 'Close_Lag_1') if c in df.columns]
+        if core_cols:
+            df = df.dropna(subset=core_cols)
+        # Optional features: fill remaining gaps so ensemble can train
+        df = df.fillna(0)
         
         if len(df) < 50:
             raise Exception("Insufficient data after feature engineering")
@@ -1791,7 +1803,7 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 "relative_volatility": market_metrics.get('relative_volatility')
             }
         
-        if fundamental_data:
+        if fundamental_data and isinstance(fundamental_data, dict):
             enhanced_metadata['fundamentals'] = {
                 "revenue_growth": fundamental_data.get('revenue_growth'),
                 "profit_margin": fundamental_data.get('profit_margin'),
