@@ -4869,14 +4869,16 @@ async def get_risk_assessment(ticker: str):
 async def get_prediction_accuracy(
     ticker: Optional[str] = None,
     model_version: Optional[str] = None,
-    horizon_days: Optional[int] = None
+    horizon_days: Optional[int] = None,
+    min_validations: int = 10,
 ):
     """Get prediction accuracy metrics from validated predictions"""
     try:
         metrics = prediction_tracker.calculate_accuracy_metrics(
             ticker=ticker,
             model_version=model_version,
-            horizon_days=horizon_days
+            horizon_days=horizon_days,
+            min_validations=min_validations,
         )
         return {
             "status": "success",
