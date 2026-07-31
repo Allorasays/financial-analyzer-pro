@@ -5,6 +5,7 @@ yfinance>=0.2.0,<1.0.0
 numpy>=1.24.0,<2.0.0
 scipy>=1.11.0,<2.0.0
 scikit-learn>=1.3.0,<2.0.0
+joblib>=1.3.0,<2.0.0
 # Signal processing for support/resistance detection
 requests>=2.31.0
 feedparser>=6.0.10

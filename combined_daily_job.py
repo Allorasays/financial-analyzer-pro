@@ -46,7 +46,7 @@ def main():
     logger.info("STEP 1: MAKING NEW PREDICTIONS")
     logger.info("=" * 80)
     try:
-        results['predictions'] = make_daily_predictions(base_url=base_url, count=10)
+        results['predictions'] = make_daily_predictions(base_url=base_url, count=30)
         logger.info(f"✓ Made {results['predictions']['successful']} predictions")
     except Exception as e:
         logger.error(f"✗ Prediction step failed: {e}", exc_info=True)

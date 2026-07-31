@@ -14,23 +14,26 @@ sys.path.append(str(Path(__file__).parent))
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# Popular stocks to predict (rotates daily)
+# Popular stocks to predict (rotates daily) — Skill: larger personal universe
 DEFAULT_TICKERS = [
-    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",  # Tech giants
-    "TSLA", "META", "NFLX", "AMD", "INTC",    # Tech growth
-    "JPM", "BAC", "WMT", "JNJ", "PG",         # Blue chips
-    "SPY", "QQQ", "DIA",                      # ETFs
-    "BABA", "NIO", "PLTR", "RIVN"             # Growth/volatile
+    "AAPL", "MSFT", "GOOGL", "AMZN", "NVDA",
+    "TSLA", "META", "NFLX", "AMD", "INTC",
+    "JPM", "BAC", "WMT", "JNJ", "PG",
+    "SPY", "QQQ", "DIA", "IWM", "XLF",
+    "BABA", "NIO", "PLTR", "RIVN", "SOFI",
+    "CRM", "ORCL", "ADBE", "AVGO", "COST",
+    "XOM", "CVX", "UNH", "V", "MA",
+    "DIS", "KO", "PEP", "T", "VZ",
 ]
 
-def make_daily_predictions(base_url: str = "http://localhost:8000", tickers: list = None, count: int = 10):
+def make_daily_predictions(base_url: str = "http://localhost:8000", tickers: list = None, count: int = 30):
     """
     Make predictions for specified number of stocks
     
     Args:
         base_url: API base URL
         tickers: List of tickers to choose from (defaults to DEFAULT_TICKERS)
-        count: Number of predictions to make (default: 10)
+        count: Number of predictions to make (default: 30)
     
     Returns:
         Dictionary with results
@@ -160,11 +163,11 @@ def main():
             # Fallback: construct from known service name
             base_url = 'https://moneta-backend-api.onrender.com'
     
-    logger.info(f"Starting daily predictions job (target: 10 predictions)")
+    logger.info(f"Starting daily predictions job (target: 30 predictions)")
     logger.info(f"API Base URL: {base_url}")
     
     try:
-        results = make_daily_predictions(base_url=base_url, count=10)
+        results = make_daily_predictions(base_url=base_url, count=30)
         
         logger.info("=" * 60)
         logger.info("DAILY PREDICTIONS SUMMARY")

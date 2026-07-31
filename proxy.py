@@ -47,6 +47,12 @@ from config import PERSONAL_USE_CONFIG
 from investability_service import build_investability_report
 from screener_service import ScreenerEngine, SCREENER_CACHE_TYPE
 from screener_universe import UNIVERSES
+from ml_model_store import (
+    MODEL_VERSION as SKILL_MODEL_VERSION,
+    append_skill_metrics,
+    load_fresh_model,
+    save_model,
+)
 
 # Import sentiment analysis service
 from sentiment_analysis_service import get_sentiment_analysis
@@ -1273,14 +1279,15 @@ def get_technical_indicators(ticker: str, period: str = "1y") -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error calculating technical indicators: {str(e)}")
 
-def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
+def get_ml_predictions(ticker: str, days_ahead: int = 30, force_retrain: bool = False) -> Dict[str, Any]:
     """Generate machine learning price predictions with comprehensive error handling and caching"""
     try:
         # Check cache first to reduce API calls
-        cache_key = f"ml_predictions_{ticker}_{days_ahead}"
-        cached_result = cache.get(cache_key)
-        if cached_result:
-            return cached_result
+        cache_key = f"ml_predictions_{ticker}_{days_ahead}_{SKILL_MODEL_VERSION}"
+        if not force_retrain:
+            cached_result = cache.get(cache_key)
+            if cached_result:
+                return cached_result
         
         # Validate input parameters
         if not ticker or not isinstance(ticker, str):
@@ -1598,19 +1605,20 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         
         # Ensure all feature columns exist
         available_features = [col for col in feature_columns if col in df.columns]
+        # Skill: predict returns — drop raw Close level to reduce price memorization
+        available_features = [c for c in available_features if c != 'Close']
         if len(available_features) < 5:
             raise Exception("Insufficient features for ML model")
         
-        X = df[available_features]
-        y = df['Close'].shift(-1).dropna()
-        
-        # Align X and y
-        X = X.iloc[:-1]
-        
-        if len(X) != len(y):
-            min_len = min(len(X), len(y))
-            X = X.iloc[:min_len]
-            y = y.iloc[:min_len]
+        # Skill target: next-day return (not next Close)
+        df['Next_Return'] = df['Close'].shift(-1) / df['Close'] - 1.0
+        feature_frame = df[available_features + ['Next_Return', 'Close']].dropna(subset=['Next_Return'])
+        if len(feature_frame) < 50:
+            raise Exception("Insufficient data after return target alignment")
+
+        X = feature_frame[available_features]
+        y = feature_frame['Next_Return']
+        closes_aligned = feature_frame['Close']
         
         # Chronological holdout (no shuffle) — last 20% is out-of-sample time
         try:
@@ -1623,78 +1631,97 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
         except Exception as e:
             raise Exception(f"Error splitting data: {str(e)}")
+
+        loaded_from_cache = False
+        cached_model = None if force_retrain else load_fresh_model(ticker)
+        if (
+            cached_model
+            and cached_model.get('features')
+            and all(f in X.columns for f in cached_model['features'])
+        ):
+            try:
+                model = cached_model['model']
+                scaler = cached_model['scaler']
+                available_features = list(cached_model['features'])
+                X = feature_frame[available_features]
+                X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+                X_train_scaled = scaler.transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+                loaded_from_cache = True
+                print(f"[ML-SKILL] Using cached model for {ticker} (age {cached_model.get('age_hours')}h)")
+            except Exception as cache_exc:
+                print(f"[ML-SKILL] Cache load failed for {ticker}, retraining: {cache_exc}")
+                loaded_from_cache = False
+                cached_model = None
+
+        if not loaded_from_cache:
+            # Scale features
+            try:
+                scaler = StandardScaler()
+                X_train_scaled = scaler.fit_transform(X_train)
+                X_test_scaled = scaler.transform(X_test)
+            except Exception as e:
+                raise Exception(f"Error scaling features: {str(e)}")
+            
+            # Train enhanced ensemble on next-day returns
+            try:
+                from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+                from sklearn.linear_model import Ridge
+                from sklearn.ensemble import VotingRegressor
+                
+                rf_model = RandomForestRegressor(
+                    n_estimators=200,
+                    max_depth=15,
+                    min_samples_split=5,
+                    min_samples_leaf=2,
+                    random_state=42,
+                    n_jobs=-1
+                )
+                
+                gb_model = GradientBoostingRegressor(
+                    n_estimators=150,
+                    learning_rate=0.1,
+                    max_depth=8,
+                    random_state=42
+                )
+                
+                ridge_model = Ridge(alpha=1.0, random_state=42)
+                
+                model = VotingRegressor([
+                    ('rf', rf_model),
+                    ('gb', gb_model),
+                    ('ridge', ridge_model)
+                ])
+                
+                model.fit(X_train_scaled, y_train)
+            except Exception as e:
+                raise Exception(f"Error training enhanced model: {str(e)}")
         
-        # Scale features
-        try:
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
-        except Exception as e:
-            raise Exception(f"Error scaling features: {str(e)}")
-        
-        # Train enhanced ensemble model for better accuracy (180-day dataset)
-        try:
-            # Use ensemble of models for better predictions
-            from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
-            from sklearn.linear_model import Ridge
-            from sklearn.ensemble import VotingRegressor
-            
-            # Individual models with optimized parameters
-            rf_model = RandomForestRegressor(
-                n_estimators=200,  # Increased for 180-day dataset
-                max_depth=15,
-                min_samples_split=5,
-                min_samples_leaf=2,
-                random_state=42,
-                n_jobs=-1
-            )
-            
-            gb_model = GradientBoostingRegressor(
-                n_estimators=150,
-                learning_rate=0.1,
-                max_depth=8,
-                random_state=42
-            )
-            
-            ridge_model = Ridge(alpha=1.0, random_state=42)
-            
-            # Ensemble model
-            model = VotingRegressor([
-                ('rf', rf_model),
-                ('gb', gb_model),
-                ('ridge', ridge_model)
-            ])
-            
-            model.fit(X_train_scaled, y_train)
-        except Exception as e:
-            raise Exception(f"Error training enhanced model: {str(e)}")
-        
-        # Calculate model performance (Trust: direction hit-rate, not R²-as-accuracy)
+        # Calculate model performance on return target
         try:
             y_pred_test = model.predict(X_test_scaled)
             holdout_r2 = float(model.score(X_test_scaled, y_test))
-            holdout_r2 = max(0.0, min(1.0, holdout_r2))
+            # R² on returns can be negative — keep raw for diagnostics, clamp for display fields
+            holdout_r2_clamped = max(0.0, min(1.0, holdout_r2))
 
             mse = float(np.mean((y_test - y_pred_test) ** 2))
             rmse = float(np.sqrt(mse))
             mae = float(np.mean(np.abs(y_test - y_pred_test)))
+            # Naive baseline: always predict 0 return
+            naive_mae = float(np.mean(np.abs(y_test.to_numpy(dtype=float))))
+            beat_naive = bool(mae < naive_mae)
 
-            if 'Close' in X_test.columns:
-                close_test = X_test['Close'].to_numpy(dtype=float)
-                y_true = y_test.to_numpy(dtype=float)
-                pred_dir = np.sign(y_pred_test - close_test)
-                true_dir = np.sign(y_true - close_test)
-                # Flat days (0) count as neither win nor loss — exclude from denominator
-                movable = true_dir != 0
-                if np.any(movable):
-                    holdout_direction_accuracy = float(np.mean(pred_dir[movable] == true_dir[movable]))
-                else:
-                    holdout_direction_accuracy = 0.5
+            y_true = y_test.to_numpy(dtype=float)
+            pred_dir = np.sign(y_pred_test)
+            true_dir = np.sign(y_true)
+            movable = true_dir != 0
+            if np.any(movable):
+                holdout_direction_accuracy = float(np.mean(pred_dir[movable] == true_dir[movable]))
             else:
                 holdout_direction_accuracy = 0.5
 
             # Prefer realized tracker skill when enough validations exist
-            accuracy_source = "chronological_holdout"
+            accuracy_source = "chronological_holdout_returns"
             realized_direction_accuracy = None
             tracker_validations = 0
             try:
@@ -1704,7 +1731,6 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 if tracker_metrics.get('status') != 'insufficient_data':
                     realized_direction_accuracy = float(tracker_metrics.get('direction_accuracy') or 0.0)
                     tracker_validations = int(tracker_metrics.get('total_validations') or 0)
-                    # Blend: realized outcomes weigh more than in-sample holdout
                     confidence = 0.4 * holdout_direction_accuracy + 0.6 * realized_direction_accuracy
                     accuracy_source = "holdout+tracker"
                 else:
@@ -1715,18 +1741,56 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 confidence = holdout_direction_accuracy
 
             confidence = max(0.0, min(1.0, float(confidence)))
+
+            try:
+                append_skill_metrics(
+                    ticker,
+                    {
+                        "holdout_direction_accuracy": round(holdout_direction_accuracy, 4),
+                        "mae_return": round(mae, 6),
+                        "rmse_return": round(rmse, 6),
+                        "naive_mae_return": round(naive_mae, 6),
+                        "beat_naive": beat_naive,
+                        "holdout_r2_returns": round(holdout_r2, 4),
+                        "n_train": int(len(X_train)),
+                        "n_test": int(len(X_test)),
+                        "loaded_from_cache": loaded_from_cache,
+                    },
+                )
+            except Exception as skill_log_exc:
+                print(f"[ML-SKILL] metrics log failed for {ticker}: {skill_log_exc}")
             
         except Exception as e:
             raise Exception(f"Error calculating model performance: {str(e)}")
+
+        # Persist trained model for warm starts (skip if already loaded fresh)
+        if not loaded_from_cache:
+            try:
+                save_model(
+                    ticker,
+                    model,
+                    scaler,
+                    available_features,
+                    metrics={
+                        "holdout_direction_accuracy": holdout_direction_accuracy,
+                        "mae_return": mae,
+                        "beat_naive": beat_naive,
+                    },
+                )
+            except Exception as save_exc:
+                print(f"[ML-SKILL] Failed to persist model for {ticker}: {save_exc}")
         
         # Make predictions for different timeframes
         try:
             latest_features = scaler.transform(X.iloc[-1:])
             
-            # Next day prediction
-            next_day_pred = float(model.predict(latest_features)[0])
-            print(f"[DEBUG] Next day prediction: {next_day_pred}")
-            daily_return = (next_day_pred - current_price) / current_price if current_price else 0.0
+            # Model outputs next-day return → convert to price for API consumers
+            predicted_return = float(model.predict(latest_features)[0])
+            # Cap extreme single-day return forecasts
+            predicted_return = float(np.clip(predicted_return, -0.08, 0.08))
+            next_day_pred = float(current_price * (1.0 + predicted_return))
+            daily_return = predicted_return
+            print(f"[DEBUG] Next day return={predicted_return:.4f} price={next_day_pred}")
 
             def _compound_capped(days: int, max_abs_change: float) -> float:
                 """Deterministic horizon from next-day signal — no random fallbacks."""
@@ -1824,18 +1888,21 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 "accuracy_metric": "direction_hit_rate",
             },
             "model_metadata": {
-                "training_data_points": len(df),
+                "training_data_points": len(feature_frame),
                 "last_training_date": datetime.now().isoformat(),
-                "model_version": "2.3.0-trust",
+                "model_version": SKILL_MODEL_VERSION,
                 "features_count": len(available_features),
                 "features_used": available_features[:10],
                 "validation": "chronological_holdout_20pct",
+                "target": "next_day_return",
+                "loaded_from_cache": loaded_from_cache,
             },
             "current_price": round(float(df['Close'].iloc[-1]), 2),
             "next_day": round(next_day_pred, 2),
             "next_week": round(next_week_pred, 2) if next_week_pred else None,
             "next_month": round(next_month_pred, 2) if next_month_pred else None,
             "next_quarter": round(next_quarter_pred, 2) if next_quarter_pred else None,
+            "predicted_return": round(predicted_return, 6),
             "confidence_score": round(confidence, 3),
             "direction_accuracy": round(confidence, 4),
             "direction_accuracy_pct": direction_pct,
@@ -1846,19 +1913,22 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "tracker_validations": tracker_validations,
             "accuracy_source": accuracy_source,
             "accuracy_note": (
-                "model_accuracy is next-day direction hit-rate (chronological holdout"
+                "model_accuracy is next-day direction hit-rate on return forecasts"
                 + (" blended with validated tracker outcomes" if accuracy_source == "holdout+tracker" else "")
-                + "). holdout_r2 is diagnostic only — not forecast skill."
+                + ". mae/rmse are on returns; beat_naive compares to zero-return baseline."
             ),
             "model_metrics": {
-                "mse": round(mse, 4),
-                "rmse": round(rmse, 4),
-                "mae": round(mae, 4),
-                "r2_score": round(holdout_r2, 4),
+                "mse": round(mse, 6),
+                "rmse": round(rmse, 6),
+                "mae": round(mae, 6),
+                "mae_return": round(mae, 6),
+                "naive_mae_return": round(naive_mae, 6),
+                "beat_naive": beat_naive,
+                "r2_score": round(holdout_r2_clamped, 4),
                 "holdout_direction_accuracy": round(holdout_direction_accuracy, 4),
                 "holdout_r2": round(holdout_r2, 4),
             },
-            "data_points": len(df),
+            "data_points": len(feature_frame),
             "features_used": len(available_features),
             "future_predictions": future_predictions,
             "status": "success",
@@ -1984,7 +2054,7 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "model_metadata": {
                 "training_data_points": 0,
                 "last_training_date": None,
-                "model_version": "2.3.0-trust"
+                "model_version": SKILL_MODEL_VERSION
             },
             "error": f"ML prediction unavailable: {str(e)}",
             "status": "unavailable",
@@ -2208,20 +2278,21 @@ async def get_technical_analysis(ticker: str, period: str = "1y"):
     return get_technical_indicators(ticker, period)
 
 @app.get("/api/ml/predictions/{ticker}")
-async def get_ml_predictions_endpoint(ticker: str, prediction_days: int = 5):
+async def get_ml_predictions_endpoint(
+    ticker: str,
+    prediction_days: int = 5,
+    force_retrain: bool = False,
+):
     """Get machine learning price predictions with comprehensive error handling"""
     try:
-        result = get_ml_predictions(ticker, prediction_days)
-        
-        # If the result contains an error, return it with appropriate status code
-        if result.get("status") == "error":
-            return JSONResponse(
-                status_code=400,
-                content=result
-            )
-        
+        result = get_ml_predictions(ticker, prediction_days, force_retrain=force_retrain)
+
+        # Trust/Skill: return body with status unavailable/error at HTTP 200 for Android parse safety
+        if result.get("status") in ("error", "unavailable"):
+            return JSONResponse(status_code=200, content=result)
+
         return result
-        
+
     except Exception as e:
         return JSONResponse(
             status_code=500,
