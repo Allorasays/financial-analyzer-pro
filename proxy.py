@@ -14,7 +14,6 @@ import pandas as pd
 import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split
 import ta
 import json
 import os
@@ -1601,9 +1600,15 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             X = X.iloc[:min_len]
             y = y.iloc[:min_len]
         
-        # Split data
+        # Chronological holdout (no shuffle) — last 20% is out-of-sample time
         try:
-            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            split_idx = int(len(X) * 0.8)
+            if split_idx < 30 or (len(X) - split_idx) < 10:
+                raise Exception(
+                    f"Insufficient rows for chronological holdout (n={len(X)}, split={split_idx})"
+                )
+            X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
+            y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
         except Exception as e:
             raise Exception(f"Error splitting data: {str(e)}")
         
@@ -1652,18 +1657,52 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         except Exception as e:
             raise Exception(f"Error training enhanced model: {str(e)}")
         
-        # Calculate model performance
+        # Calculate model performance (Trust: direction hit-rate, not R²-as-accuracy)
         try:
             y_pred_test = model.predict(X_test_scaled)
-            confidence = model.score(X_test_scaled, y_test)
-            
-            # Ensure confidence is within valid bounds (0.0 to 1.0)
-            confidence = max(0.0, min(1.0, confidence))
-            
-            # Calculate additional metrics
-            mse = np.mean((y_test - y_pred_test) ** 2)
-            rmse = np.sqrt(mse)
-            mae = np.mean(np.abs(y_test - y_pred_test))
+            holdout_r2 = float(model.score(X_test_scaled, y_test))
+            holdout_r2 = max(0.0, min(1.0, holdout_r2))
+
+            mse = float(np.mean((y_test - y_pred_test) ** 2))
+            rmse = float(np.sqrt(mse))
+            mae = float(np.mean(np.abs(y_test - y_pred_test)))
+
+            if 'Close' in X_test.columns:
+                close_test = X_test['Close'].to_numpy(dtype=float)
+                y_true = y_test.to_numpy(dtype=float)
+                pred_dir = np.sign(y_pred_test - close_test)
+                true_dir = np.sign(y_true - close_test)
+                # Flat days (0) count as neither win nor loss — exclude from denominator
+                movable = true_dir != 0
+                if np.any(movable):
+                    holdout_direction_accuracy = float(np.mean(pred_dir[movable] == true_dir[movable]))
+                else:
+                    holdout_direction_accuracy = 0.5
+            else:
+                holdout_direction_accuracy = 0.5
+
+            # Prefer realized tracker skill when enough validations exist
+            accuracy_source = "chronological_holdout"
+            realized_direction_accuracy = None
+            tracker_validations = 0
+            try:
+                tracker_metrics = prediction_tracker.calculate_accuracy_metrics(
+                    ticker=ticker, horizon_days=1, min_validations=5
+                )
+                if tracker_metrics.get('status') != 'insufficient_data':
+                    realized_direction_accuracy = float(tracker_metrics.get('direction_accuracy') or 0.0)
+                    tracker_validations = int(tracker_metrics.get('total_validations') or 0)
+                    # Blend: realized outcomes weigh more than in-sample holdout
+                    confidence = 0.4 * holdout_direction_accuracy + 0.6 * realized_direction_accuracy
+                    accuracy_source = "holdout+tracker"
+                else:
+                    confidence = holdout_direction_accuracy
+                    tracker_validations = int(tracker_metrics.get('total_validations') or 0)
+            except Exception as tracker_exc:
+                print(f"[PREDICTION-TRACKER] Accuracy lookup failed for {ticker}: {tracker_exc}")
+                confidence = holdout_direction_accuracy
+
+            confidence = max(0.0, min(1.0, float(confidence)))
             
         except Exception as e:
             raise Exception(f"Error calculating model performance: {str(e)}")
@@ -1673,159 +1712,72 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             latest_features = scaler.transform(X.iloc[-1:])
             
             # Next day prediction
-            next_day_pred = model.predict(latest_features)[0]
+            next_day_pred = float(model.predict(latest_features)[0])
             print(f"[DEBUG] Next day prediction: {next_day_pred}")
-            
-            # Next week prediction (7 days) - Use realistic volatility-based approach
-            next_week_pred = None
-            try:
-                # Calculate daily volatility from historical data
-                daily_returns = df['Close'].pct_change().dropna()
-                daily_volatility = daily_returns.std()
-                
-                # Use compound returns for weekly prediction (more realistic)
-                daily_return = (next_day_pred - current_price) / current_price
-                
-                # Apply realistic weekly volatility bounds (1-8% weekly change)
-                max_weekly_change = min(0.08, abs(daily_return) * 3)  # Cap at 8% or 3x daily
-                weekly_return = np.clip(daily_return * 2.5, -max_weekly_change, max_weekly_change)
-                
-                # Use compound growth: (1 + daily_return)^5
-                next_week_pred = current_price * ((1 + daily_return) ** 5)
-                
-                # Apply final bounds check
-                weekly_change_pct = (next_week_pred - current_price) / current_price
-                if abs(weekly_change_pct) > 0.08:  # Max 8% weekly change
-                    next_week_pred = current_price * (1 + np.sign(weekly_change_pct) * 0.08)
-                
-                print(f"[DEBUG] Next week prediction: {next_week_pred}")
-                    
-            except Exception as e:
-                # Fallback: conservative 1-3% weekly change
-                weekly_change = np.random.uniform(-0.03, 0.03)
-                next_week_pred = current_price * (1 + weekly_change)
-            
-            # Next month prediction (30 days) - Use realistic volatility-based approach
-            next_month_pred = None
-            try:
-                # Calculate monthly volatility from historical data
-                monthly_returns = df['Close'].resample('M').last().pct_change().dropna()
-                monthly_volatility = monthly_returns.std() if len(monthly_returns) > 0 else 0.05
-                
-                # Use compound returns for monthly prediction
-                daily_return = (next_day_pred - current_price) / current_price
-                
-                # Apply realistic monthly volatility bounds (2-15% monthly change)
-                max_monthly_change = min(0.15, monthly_volatility * 2)
-                monthly_return = np.clip(daily_return * 8, -max_monthly_change, max_monthly_change)
-                
-                # Use compound growth: (1 + daily_return)^20
-                next_month_pred = current_price * ((1 + daily_return) ** 20)
-                
-                # Apply final bounds check
-                monthly_change_pct = (next_month_pred - current_price) / current_price
-                if abs(monthly_change_pct) > 0.15:  # Max 15% monthly change
-                    next_month_pred = current_price * (1 + np.sign(monthly_change_pct) * 0.15)
-                
-                print(f"[DEBUG] Next month prediction: {next_month_pred}")
-                    
-            except Exception as e:
-                # Fallback: conservative 2-8% monthly change
-                monthly_change = np.random.uniform(-0.08, 0.08)
-                next_month_pred = current_price * (1 + monthly_change)
-            
-            # Next quarter prediction (90 days) - Use realistic volatility-based approach
-            next_quarter_pred = None
-            try:
-                # Calculate quarterly volatility from historical data
-                quarterly_returns = df['Close'].resample('Q').last().pct_change().dropna()
-                quarterly_volatility = quarterly_returns.std() if len(quarterly_returns) > 0 else 0.10
-                
-                # Use compound returns for quarterly prediction
-                daily_return = (next_day_pred - current_price) / current_price
-                
-                # Apply realistic quarterly volatility bounds (5-25% quarterly change)
-                max_quarterly_change = min(0.25, quarterly_volatility * 2)
-                quarterly_return = np.clip(daily_return * 15, -max_quarterly_change, max_quarterly_change)
-                
-                # Use compound growth: (1 + daily_return)^60
-                next_quarter_pred = current_price * ((1 + daily_return) ** 60)
-                
-                # Apply final bounds check
-                quarterly_change_pct = (next_quarter_pred - current_price) / current_price
-                if abs(quarterly_change_pct) > 0.25:  # Max 25% quarterly change
-                    next_quarter_pred = current_price * (1 + np.sign(quarterly_change_pct) * 0.25)
-                    
-            except Exception as e:
-                # Fallback: conservative 5-15% quarterly change
-                quarterly_change = np.random.uniform(-0.15, 0.15)
-                next_quarter_pred = current_price * (1 + quarterly_change)
+            daily_return = (next_day_pred - current_price) / current_price if current_price else 0.0
+
+            def _compound_capped(days: int, max_abs_change: float) -> float:
+                """Deterministic horizon from next-day signal — no random fallbacks."""
+                pred = current_price * ((1.0 + daily_return) ** days)
+                change_pct = (pred - current_price) / current_price if current_price else 0.0
+                if abs(change_pct) > max_abs_change:
+                    pred = current_price * (1.0 + np.sign(change_pct) * max_abs_change)
+                return float(pred)
+
+            next_week_pred = _compound_capped(5, 0.08)
+            next_month_pred = _compound_capped(20, 0.15)
+            next_quarter_pred = _compound_capped(60, 0.25)
+            print(f"[DEBUG] Next week/month/quarter: {next_week_pred}, {next_month_pred}, {next_quarter_pred}")
             
         except Exception as e:
             raise Exception(f"Error making predictions: {str(e)}")
         
-        # Generate future predictions for requested days
+        # Generate future predictions for requested days (deterministic compound path)
         future_predictions = []
         try:
-            # Use realistic daily volatility instead of sequential ML predictions
             daily_returns = df['Close'].pct_change().dropna()
-            daily_volatility = daily_returns.std()
-            
-            for day in range(1, min(days_ahead + 1, 31)):  # Limit to 30 days for stability
-                # Use compound growth with realistic volatility bounds
-                daily_return = (next_day_pred - current_price) / current_price
-                
-                # Apply realistic bounds for each day (max 2% daily change)
-                max_daily_change = min(0.02, daily_volatility * 2)
-                bounded_daily_return = np.clip(daily_return, -max_daily_change, max_daily_change)
-                
-                # Use compound growth: (1 + daily_return)^day
-                pred = current_price * ((1 + bounded_daily_return) ** day)
-                
-                # Apply additional bounds check
-                max_total_change = min(0.30, day * 0.02)  # Max 30% total change or 2% per day
-                total_change_pct = (pred - current_price) / current_price
-                if abs(total_change_pct) > max_total_change:
-                    pred = current_price * (1 + np.sign(total_change_pct) * max_total_change)
-                
-                future_predictions.append({
-                    "day": day,
-                    "predicted_price": round(pred, 2),
-                    "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d")
-                })
-                
-        except Exception as e:
-            # Fallback predictions if sequential prediction fails
-            current_price = df['Close'].iloc[-1]
+            daily_volatility = float(daily_returns.std()) if len(daily_returns) else 0.02
+            max_daily_change = min(0.02, daily_volatility * 2) if daily_volatility else 0.02
+            bounded_daily_return = float(np.clip(daily_return, -max_daily_change, max_daily_change))
+
             for day in range(1, min(days_ahead + 1, 31)):
-                pred = current_price * (1 + np.random.normal(0, 0.02))
+                pred = current_price * ((1.0 + bounded_daily_return) ** day)
+                max_total_change = min(0.30, day * 0.02)
+                total_change_pct = (pred - current_price) / current_price if current_price else 0.0
+                if abs(total_change_pct) > max_total_change:
+                    pred = current_price * (1.0 + np.sign(total_change_pct) * max_total_change)
+
                 future_predictions.append({
                     "day": day,
                     "predicted_price": round(pred, 2),
-                    "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d")
+                    "date": (datetime.now() + timedelta(days=day)).strftime("%Y-%m-%d"),
+                    "confidence": round(confidence * max(0.5, 1.0 - 0.01 * day), 3),
                 })
+        except Exception as e:
+            print(f"[WARNING] Future prediction path failed for {ticker}: {e}")
+            future_predictions = []
         
         # Prepare comprehensive response - Android compatible format
+        # Trust: model_accuracy / confidence = direction hit-rate, NOT R²
         price_forecast = [round(next_day_pred, 2)]
-        confidence_scores = [round(min(1.0, max(0.0, confidence)), 3)]
+        confidence_scores = [round(confidence, 3)]
         
-        # Add additional predictions if available
-        if next_week_pred:
+        if next_week_pred is not None:
             price_forecast.append(round(next_week_pred, 2))
-            confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.95)), 3))  # Slightly lower confidence for longer periods
+            confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.95)), 3))
         
-        if next_month_pred:
+        if next_month_pred is not None:
             price_forecast.append(round(next_month_pred, 2))
             confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.90)), 3))
             
-        if next_quarter_pred:
+        if next_quarter_pred is not None:
             price_forecast.append(round(next_quarter_pred, 2))
             confidence_scores.append(round(min(1.0, max(0.0, confidence * 0.85)), 3))
         
-        # Risk assessment based on confidence
-        if confidence > 0.8:
+        # Risk from direction skill (not R²)
+        if confidence >= 0.55:
             risk_assessment = "Low Risk"
-        elif confidence > 0.6:
+        elif confidence >= 0.50:
             risk_assessment = "Medium Risk"
         else:
             risk_assessment = "High Risk"
@@ -1846,6 +1798,7 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 "debt_to_assets": fundamental_data.get('debt_to_assets')
             }
         
+        direction_pct = round(confidence * 100.0, 1)
         response = {
             "ticker": ticker.upper(),
             "prediction_days": days_ahead,
@@ -1854,34 +1807,50 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
             "predictions": {
                 "price_forecast": price_forecast,
                 "confidence_scores": confidence_scores,
-                "model_accuracy": round(min(100.0, max(0.0, confidence * 100)), 1),
-                "risk_assessment": risk_assessment
+                "model_accuracy": direction_pct,
+                "risk_assessment": risk_assessment,
+                "accuracy_metric": "direction_hit_rate",
             },
             "model_metadata": {
                 "training_data_points": len(df),
                 "last_training_date": datetime.now().isoformat(),
-                "model_version": "2.2.0",  # Updated with all new features
+                "model_version": "2.3.0-trust",
                 "features_count": len(available_features),
-                "features_used": available_features[:10]  # First 10 features for reference
+                "features_used": available_features[:10],
+                "validation": "chronological_holdout_20pct",
             },
-            # Additional fields for compatibility
-            "current_price": round(df['Close'].iloc[-1], 2),
+            "current_price": round(float(df['Close'].iloc[-1]), 2),
             "next_day": round(next_day_pred, 2),
             "next_week": round(next_week_pred, 2) if next_week_pred else None,
             "next_month": round(next_month_pred, 2) if next_month_pred else None,
             "next_quarter": round(next_quarter_pred, 2) if next_quarter_pred else None,
-            "confidence_score": round(min(1.0, max(0.0, confidence)), 3),
+            "confidence_score": round(confidence, 3),
+            "direction_accuracy": round(confidence, 4),
+            "direction_accuracy_pct": direction_pct,
+            "holdout_direction_accuracy": round(holdout_direction_accuracy, 4),
+            "realized_direction_accuracy": (
+                round(realized_direction_accuracy, 4) if realized_direction_accuracy is not None else None
+            ),
+            "tracker_validations": tracker_validations,
+            "accuracy_source": accuracy_source,
+            "accuracy_note": (
+                "model_accuracy is next-day direction hit-rate (chronological holdout"
+                + (" blended with validated tracker outcomes" if accuracy_source == "holdout+tracker" else "")
+                + "). holdout_r2 is diagnostic only — not forecast skill."
+            ),
             "model_metrics": {
                 "mse": round(mse, 4),
                 "rmse": round(rmse, 4),
                 "mae": round(mae, 4),
-                "r2_score": round(confidence, 4)
+                "r2_score": round(holdout_r2, 4),
+                "holdout_direction_accuracy": round(holdout_direction_accuracy, 4),
+                "holdout_r2": round(holdout_r2, 4),
             },
             "data_points": len(df),
             "features_used": len(available_features),
             "future_predictions": future_predictions,
             "status": "success",
-            **enhanced_metadata  # Include market correlation and fundamentals if available
+            **enhanced_metadata
         }
 
         try:
@@ -1890,6 +1859,9 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 {
                     "confidence": response["confidence_score"],
                     "model_accuracy": response["predictions"]["model_accuracy"],
+                    "direction_accuracy": response["direction_accuracy"],
+                    "holdout_direction_accuracy": response["holdout_direction_accuracy"],
+                    "accuracy_source": accuracy_source,
                     "rmse": response["model_metrics"]["rmse"],
                     "mae": response["model_metrics"]["mae"],
                     "r2_score": response["model_metrics"]["r2_score"],
@@ -1974,19 +1946,19 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
         return response
         
     except Exception as e:
-        # Return error response instead of raising HTTPException - Android compatible format
+        # Return unavailable — never invent random prices
         try:
             log_prediction_metrics(
                 ticker,
                 {
-                    "status": "error",
+                    "status": "unavailable",
                     "error": str(e),
                 },
             )
         except Exception as exc:
             print(f"[ML-METRICS] Logging failed for error case {ticker}: {exc}")
         return {
-            "ticker": ticker.upper(),
+            "ticker": ticker.upper() if ticker else "",
             "prediction_days": days_ahead,
             "model_type": "ensemble",
             "timestamp": datetime.now().isoformat(),
@@ -1994,22 +1966,26 @@ def get_ml_predictions(ticker: str, days_ahead: int = 30) -> Dict[str, Any]:
                 "price_forecast": [],
                 "confidence_scores": [],
                 "model_accuracy": 0.0,
-                "risk_assessment": "Error"
+                "risk_assessment": "Unavailable",
+                "accuracy_metric": "direction_hit_rate",
             },
             "model_metadata": {
                 "training_data_points": 0,
                 "last_training_date": None,
-                "model_version": "2.0.0"
+                "model_version": "2.3.0-trust"
             },
-            "error": f"ML prediction failed: {str(e)}",
-            "status": "error",
-            # Additional fields for compatibility
-            "current_price": 0.0,
+            "error": f"ML prediction unavailable: {str(e)}",
+            "status": "unavailable",
+            "current_price": None,
             "next_day": None,
             "next_week": None,
             "next_month": None,
             "next_quarter": None,
-            "confidence_score": 0.0,
+            "confidence_score": None,
+            "direction_accuracy": None,
+            "direction_accuracy_pct": None,
+            "accuracy_source": None,
+            "accuracy_note": "Predictions unavailable — no synthetic/random fallback generated.",
             "future_predictions": []
         }
 
