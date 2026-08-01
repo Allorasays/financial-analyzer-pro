@@ -4915,15 +4915,33 @@ async def validate_predictions(max_days_past: int = 7):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error validating predictions: {str(e)}")
 
+@app.get("/api/prediction-tracker/stats")
+async def get_prediction_tracker_stats():
+    """Monitoring stats: stored predictions, awaiting target date, ready, validated."""
+    try:
+        stats = prediction_tracker.get_tracker_stats()
+        return {
+            "status": "success",
+            "stats": stats,
+            "timestamp": datetime.now().isoformat(),
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error fetching tracker stats: {str(e)}")
+
+
 @app.get("/api/prediction-pending")
 async def get_pending_validations(max_days_past: int = 7):
     """Get list of predictions waiting for validation"""
     try:
         pending = prediction_tracker.get_pending_validations(max_days_past=max_days_past)
+        stats = prediction_tracker.get_tracker_stats()
         return {
             "status": "success",
             "pending_count": len(pending),
             "pending_predictions": pending,
+            "awaiting_target": stats.get("awaiting_target", 0),
+            "awaiting_horizon1": stats.get("awaiting_horizon1", 0),
+            "total_predictions": stats.get("total_predictions", 0),
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:

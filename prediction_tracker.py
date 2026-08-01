@@ -14,11 +14,24 @@ logger = logging.getLogger(__name__)
 
 DB_PATH = Path("data/prediction_tracker.db")
 
+
+def _resolve_db_path() -> Path:
+    """Prefer durable path on Render when a disk is mounted."""
+    import os
+    override = os.getenv("PREDICTION_TRACKER_DB", "").strip()
+    if override:
+        return Path(override)
+    for candidate in (Path("/var/data/prediction_tracker.db"), Path("/data/prediction_tracker.db")):
+        if candidate.parent.exists():
+            return candidate
+    return DB_PATH
+
+
 class PredictionTracker:
     """Tracks ML predictions and validates them against actual outcomes"""
     
-    def __init__(self, db_path: Path = DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Path = None):
+        self.db_path = db_path or _resolve_db_path()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_database()
     
@@ -257,6 +270,76 @@ class PredictionTracker:
             })
         
         return pending
+
+    def get_tracker_stats(self) -> Dict[str, Any]:
+        """Counts for monitoring: stored, awaiting target date, ready to validate, validated."""
+        conn = sqlite3.connect(str(self.db_path))
+        cursor = conn.cursor()
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+
+        cursor.execute('SELECT COUNT(*) FROM predictions')
+        total_predictions = int(cursor.fetchone()[0])
+        cursor.execute('SELECT COUNT(*) FROM validations')
+        total_validations = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM predictions p
+            LEFT JOIN validations v ON p.id = v.prediction_id
+            WHERE v.id IS NULL AND p.target_date > ?
+        ''', (today,))
+        awaiting_target = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM predictions p
+            LEFT JOIN validations v ON p.id = v.prediction_id
+            WHERE v.id IS NULL AND p.target_date <= ?
+        ''', (today,))
+        ready_to_validate = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM predictions p
+            LEFT JOIN validations v ON p.id = v.prediction_id
+            WHERE v.id IS NULL AND p.horizon_days = 1 AND p.target_date > ?
+        ''', (today,))
+        awaiting_horizon1 = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM validations v
+            JOIN predictions p ON v.prediction_id = p.id
+            WHERE p.horizon_days = 1
+        ''')
+        validated_horizon1 = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT COUNT(DISTINCT p.ticker) FROM predictions p
+        ''')
+        tickers_predicted = int(cursor.fetchone()[0])
+
+        cursor.execute('''
+            SELECT date(created_at), COUNT(*) FROM predictions
+            GROUP BY date(created_at) ORDER BY 1 DESC LIMIT 14
+        ''')
+        prediction_days = [{"date": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT date(validated_at), COUNT(*) FROM validations
+            GROUP BY date(validated_at) ORDER BY 1 DESC LIMIT 14
+        ''')
+        validation_days = [{"date": r[0], "count": r[1]} for r in cursor.fetchall()]
+
+        conn.close()
+        return {
+            "total_predictions": total_predictions,
+            "total_validations": total_validations,
+            "awaiting_target": awaiting_target,
+            "awaiting_horizon1": awaiting_horizon1,
+            "ready_to_validate": ready_to_validate,
+            "validated_horizon1": validated_horizon1,
+            "tickers_predicted": tickers_predicted,
+            "prediction_days": prediction_days,
+            "validation_days": validation_days,
+            "as_of": today,
+        }
     
     def calculate_accuracy_metrics(
         self,
@@ -360,5 +443,10 @@ class PredictionTracker:
 
 # Global instance
 prediction_tracker = PredictionTracker()
+
+
+
+
+
 
 
